@@ -1,0 +1,64 @@
+use crate::cli::GUICommand::ValidMoves;
+use std::io;
+
+pub(crate) enum GUICommand {
+    // UCI
+    UCI,
+    IsReady,
+
+    // Regular chess bot
+    Play,
+    Move(String), // perform a move
+
+    // Shared
+    Position(Option<String>), // `position` for both
+    ValidMoves(usize),        // `go perf <depth>` for UCI, `moves` for player,
+    Quit,                     // quit the program
+}
+
+pub(crate) enum BotCommand {
+    Identify(String, String),
+    UCIOk,
+    ReadyOk,
+
+    // Player
+    PlayOk,
+}
+
+pub(crate) fn receive() -> Option<GUICommand> {
+    let mut input = String::new();
+
+    io::stdin()
+        .read_line(&mut input)
+        .expect("Failed to read line");
+
+    let parts = input.as_str().trim().split_whitespace().collect::<Vec<_>>();
+
+    match parts.as_slice() {
+        ["uci"] => Some(GUICommand::UCI),
+        ["isready"] => Some(GUICommand::IsReady),
+        ["ucinewgame"] => Some(GUICommand::Position(None)),
+        ["position", "startpos"] => Some(GUICommand::Position(None)),
+        ["position", "startpos", ..] => unimplemented!(),
+        ["position", "fen", fen @ ..] => Some(GUICommand::Position(Some(fen.join(" ")))),
+        ["setoption", ..] => unimplemented!(),
+        ["go", "perft", depth] | ["moves", depth] => Some(ValidMoves(depth.parse().unwrap_or(1))),
+        ["play"] => Some(GUICommand::Play),
+        ["quit"] => Some(GUICommand::Quit),
+        ["move", notation] => Some(GUICommand::Move(notation.to_string())),
+        _ => None,
+    }
+}
+
+pub(crate) fn respond(command: BotCommand) {
+    match command {
+        BotCommand::Identify(name, author) => {
+            println!("identify name {}", name);
+            println!("identify author {}", author);
+        }
+        BotCommand::ReadyOk => println!("readyok"),
+        BotCommand::UCIOk => println!("uciok"),
+
+        BotCommand::PlayOk => println!("playok"),
+    }
+}
