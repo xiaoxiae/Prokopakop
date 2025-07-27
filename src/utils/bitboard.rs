@@ -1,16 +1,16 @@
 use crate::game::{Color, Piece};
-use strum::{EnumCount};
+use strum::EnumCount;
 
 pub type Bitboard = u64;
 
 pub trait BitboardExt {
     fn position_to_bitmask(x: u32, y: u32) -> Self;
+    fn is_set(&self, x: u32, y: u32) -> bool;
     fn print(&self, title: Option<&str>, position: Option<(u32, u32)>);
 }
 
-// used because we can't have a const fn as a trait,
+// used like this because we can't have a const fn as a trait,
 // but we want to use it for the compile-time bitmap calculation
-
 const fn position_to_bitmask(x: u32, y: u32) -> u64 {
     1u64 << x + y * 8
 }
@@ -22,6 +22,10 @@ const fn is_position_valid(x: isize, y: isize) -> bool {
 impl BitboardExt for u64 {
     fn position_to_bitmask(x: u32, y: u32) -> Self {
         position_to_bitmask(x, y)
+    }
+
+    fn is_set(&self, x: u32, y: u32) -> bool {
+        self & position_to_bitmask(x, y) != 0
     }
 
     fn print(&self, title: Option<&str>, position: Option<(u32, u32)>) {
@@ -58,6 +62,7 @@ impl BitboardExt for u64 {
     }
 }
 
+type PawnBitboards = [[Bitboard; 64]; Color::COUNT];
 type ValidMoveBitboards = [[[Bitboard; 64]; Piece::COUNT]; Color::COUNT];
 
 const fn create_bitboard_for_piece(
@@ -196,4 +201,67 @@ const fn calculate_bitboard_for_pieces() -> ValidMoveBitboards {
     bitboards
 }
 
+const fn calculate_pawn_attack_moves() -> PawnBitboards {
+    let mut bitboards = [[0; 64]; Color::COUNT];
+
+    let mut color = 0;
+    while color < Color::COUNT {
+        let mut x = 0;
+
+        while x < 8 {
+            let mut y = 0;
+
+            while y < 8 {
+                let deltas = match color {
+                    0 => [[-1, -1], [1, -1]],
+                    1 => [[-1, 1], [1, 1]],
+                    _ => unreachable!(),
+                };
+
+                bitboards[color][x + y * 8] |= create_bitboard_for_piece(x, y, &deltas, false);
+
+                y += 1;
+            }
+
+            x += 1;
+        }
+        color += 1;
+    }
+
+    bitboards
+}
+
+const fn calculate_pawn_first_moves() -> PawnBitboards {
+    let mut bitboards = [[0; 64]; Color::COUNT];
+
+    let mut color = 0;
+    while color < Color::COUNT {
+        let mut x = 0;
+
+        while x < 8 {
+            let mut y = 0;
+
+            while y < 8 {
+                let deltas = match color {
+                    0 => [[0, -2]],
+                    1 => [[0, 2]],
+                    _ => unreachable!(),
+                };
+
+                bitboards[color][x + y * 8] |= create_bitboard_for_piece(x, y, &deltas, false);
+
+                y += 1;
+            }
+
+            x += 1;
+        }
+        color += 1;
+    }
+
+    bitboards
+}
+
 pub const VALID_MOVE_BITBOARDS: ValidMoveBitboards = calculate_bitboard_for_pieces();
+
+pub const PAWN_ATTACK_MOVE_BITBOARD: PawnBitboards = calculate_pawn_attack_moves();
+pub const PAWN_FIRST_MOVE_BITBOARD: PawnBitboards = calculate_pawn_first_moves();

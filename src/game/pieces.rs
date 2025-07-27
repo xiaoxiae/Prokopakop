@@ -1,7 +1,7 @@
 use std::ops::Not;
 use strum_macros::{EnumCount, EnumIter, FromRepr};
 
-#[derive(Copy, Clone, Debug, EnumIter, EnumCount, FromRepr)]
+#[derive(Copy, Clone, Debug, PartialEq, EnumIter, EnumCount, FromRepr)]
 pub enum Piece {
     Pawn = 0,
     Knight = 1,

@@ -1,9 +1,10 @@
 use super::pieces::{Color, Piece};
 use crate::utils::Bitboard;
-use crate::{BitboardExt, VALID_MOVE_BITBOARDS};
+use crate::{BitboardExt, PAWN_ATTACK_MOVE_BITBOARD, PAWN_FIRST_MOVE_BITBOARD, VALID_MOVE_BITBOARDS};
+use std::cmp::PartialEq;
 use strum::{EnumCount, IntoEnumIterator};
 
-#[derive(Debug)]
+#[derive(Debug, Eq, PartialEq)]
 pub struct BoardSquare {
     pub x: u32,
     pub y: u32,
@@ -38,9 +39,35 @@ impl BoardSquare {
     pub fn to_mask(&self) -> Bitboard {
         Bitboard::position_to_bitmask(self.x, self.y)
     }
+
+    pub fn to_index(&self) -> usize {
+        self.x as usize + self.y as usize * 8
+    }
 }
 
 impl BoardMove {
+    pub fn parse(string: &str) -> Option<BoardMove> {
+        let from = string.get(0..2);
+        let to = string.get(2..4);
+
+        let promotion = string
+            .get(4..5)
+            .and_then(|promotion| promotion.chars().next())
+            .and_then(|char| Piece::from_char(char));
+
+        match (
+            from.and_then(BoardSquare::parse),
+            to.and_then(BoardSquare::parse),
+        ) {
+            (Some(from), Some(to)) => Some(BoardMove {
+                from,
+                to,
+                promotion,
+            }),
+            _ => None,
+        }
+    }
+
     pub fn unparse(&self) -> String {
         format!(
             "{}{}{}",
@@ -200,7 +227,11 @@ impl Game {
         }
     }
 
-    pub fn move_piece(&mut self, board_move: BoardMove) {
+    pub fn unmake_move(&mut self, board_move: BoardMove) {
+        unimplemented!()
+    }
+
+    pub fn make_move(&mut self, board_move: BoardMove) {
         let (piece, color) = self.pieces[board_move.from.y as usize][board_move.from.x as usize]
             .expect("No piece at source square");
 
@@ -215,15 +246,51 @@ impl Game {
         self.pieces[board_move.to.y as usize][board_move.to.x as usize] = Some((piece, color));
         self.pieces[board_move.from.y as usize][board_move.from.x as usize] = None;
 
+        // TODO
         // castling_flags: u8, // 0x0000QKqk, where kq/KQ is one if black/white king and queen
         // en_passant_bitmap: u64, // if a piece just moved for the first time, 1 will be left in its place
     }
 
-    pub fn get_valid_piece_moves(&self, square: &BoardSquare) -> Vec<BoardSquare> {
-        vec![]
+    ///
+    /// Generate a bitboard that contains valid moves for a particular square,
+    /// assuming the current game state.
+    /// TODO: magic bitboards for occlusions
+    /// TODO: en-passant
+    /// TODO: pins
+    /// TODO: castling
+    ///
+    pub fn get_valid_move_bitboard(&self, square: &BoardSquare) -> Bitboard {
+        let (piece, color) = match self.pieces[square.y as usize][square.x as usize] {
+            Some(v) => v,
+            None => return 0
+        };
+
+        // Baseline valid moves bitmap
+        let mut valid_moves =
+            VALID_MOVE_BITBOARDS[self.turn as usize][piece as usize][square.to_index()];
+
+        // Can't capture own pieces
+        valid_moves &= !self.color_bitboards[color as usize];
+
+        // If pawn
+        if piece == Piece::Pawn {
+            // First moves
+            // TODO: maybe don't hardcode it like this?
+            if square.y == 1 || square.y == 6 {
+                valid_moves |= PAWN_FIRST_MOVE_BITBOARD[self.turn as usize][square.to_index()];
+            }
+
+            // Attack moves towards enemy pieces
+            valid_moves |= PAWN_ATTACK_MOVE_BITBOARD[self.turn as usize][square.to_index()]
+                & self.color_bitboards[!self.turn as usize];
+        }
+
+        valid_moves.print(Some("Valid Moves"), None);
+
+        valid_moves
     }
 
-    pub fn try_move_piece(&mut self, board_move: BoardMove) -> MoveResultType {
+    pub fn try_make_move(&mut self, board_move: BoardMove) -> MoveResultType {
         let from_bitmask = board_move.from.to_mask();
         let to_bitmask = board_move.to.to_mask();
 
@@ -238,21 +305,14 @@ impl Game {
                 }
 
                 // Baseline valid moves bitmap
-                let mut valid_moves = VALID_MOVE_BITBOARDS[self.turn as usize][piece as usize]
-                    [board_move.from.x as usize + board_move.from.y as usize * 8];
-
-                // Can't capture own pieces
-                // TODO: can't GO through own pieces!!!
-                valid_moves &= !self.color_bitboards[color as usize];
-
-                valid_moves.print(Some("Valid Moves"), None);
+                let valid_moves = self.get_valid_move_bitboard(&board_move.from);
 
                 // Not a valid destination square
                 if valid_moves & to_bitmask == 0 {
                     return MoveResultType::WrongDestination;
                 }
 
-                self.move_piece(board_move);
+                self.make_move(board_move);
                 self.turn = !self.turn;
 
                 if self.turn == Color::White {

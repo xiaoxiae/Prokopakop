@@ -12,7 +12,7 @@ pub(crate) enum GUICommand {
 
     // Shared
     Position(Option<String>), // `position` for both
-    ValidMoves(usize),        // `go perf <depth>` for UCI, `moves` for player,
+    ValidMoves(String),       // `go perf <depth>` for UCI, `moves` for player,
     Quit,                     // quit the program
 }
 
@@ -42,7 +42,8 @@ pub(crate) fn receive() -> Option<GUICommand> {
         ["position", "startpos", ..] => unimplemented!(),
         ["position", "fen", fen @ ..] => Some(GUICommand::Position(Some(fen.join(" ")))),
         ["setoption", ..] => unimplemented!(),
-        ["go", "perft", depth] | ["moves", depth] => Some(ValidMoves(depth.parse().unwrap_or(1))),
+        ["moves"] => Some(ValidMoves("1".to_string())),
+        ["go", "perft", depth] | ["moves", depth] => Some(ValidMoves(depth.to_string())),
         ["play"] => Some(GUICommand::Play),
         ["quit"] => Some(GUICommand::Quit),
         ["move", notation] => Some(GUICommand::Move(notation.to_string())),

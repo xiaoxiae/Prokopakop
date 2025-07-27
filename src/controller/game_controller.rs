@@ -6,35 +6,42 @@ pub enum Mode {
 }
 
 pub struct GameController {
-    pub game: Option<Game>,
+    pub game: Game,
     pub mode: Option<Mode>,
 }
 
 impl GameController {
     pub fn new() -> Self {
         Self {
-            game: None,
+            // TODO: a bit wasteful
+            game: Game::new(None),
             mode: None,
         }
     }
-    
+
     pub fn new_game(&mut self, fen: Option<&str>) {
-        self.game = Some(Game::new(fen));
+        self.game = Game::new(fen);
     }
-    
+
     pub fn initialize(&mut self, mode: Mode) {
         self.mode = Some(mode);
         self.new_game(None);
     }
 
-    pub fn print(&self) {
+    pub fn print(&self, possible_moves: Option<Vec<&BoardSquare>>) {
         const RESET: &str = "\x1b[0m";
         const LIGHT_SQUARE_BG: &str = "\x1b[48;5;214m"; // Orange background
         const DARK_SQUARE_BG: &str = "\x1b[48;5;130m"; // Brown background
         const WHITE_PIECE: &str = "\x1b[1;97m"; // Bright white for white pieces
         const BLACK_PIECE: &str = "\x1b[1;30m"; // Black for black pieces
-        
-        let game = self.game.as_ref().unwrap();
+        const MOVE_HIGHLIGHT: &str = "\x1b[1;34m"; // Blue color for move highlights
+
+        // Convert possible moves to a HashSet for O(1) lookup
+        let move_squares: std::collections::HashSet<(usize, usize)> = possible_moves
+            .map(|moves| {
+                moves.iter().map(|square| (square.x as usize, square.y as usize)).collect()
+            })
+            .unwrap_or_default();
 
         for y in (0..8).rev() {
             let mut line = String::new();
@@ -47,7 +54,7 @@ impl GameController {
                 };
                 line.push_str(bg_color);
 
-                match game.pieces[y as usize][x as usize] {
+                match self.game.pieces[y][x] {
                     Some((piece, color)) => {
                         let piece_color = match color {
                             Color::White => WHITE_PIECE,
@@ -55,7 +62,14 @@ impl GameController {
                         };
                         line.push_str(&format!("{} {} {}", piece_color, piece.to_emoji(), RESET));
                     }
-                    None => line.push_str("   "),
+                    None => {
+                        // Check if this square is a possible move
+                        if move_squares.contains(&(x, y)) {
+                            line.push_str(&format!("{} ● {}", MOVE_HIGHLIGHT, RESET));
+                        } else {
+                            line.push_str("   ");
+                        }
+                    }
                 }
 
                 line.push_str(RESET);
@@ -65,30 +79,42 @@ impl GameController {
     }
 
     pub fn try_move_piece(&mut self, long_algebraic_notation: String) -> MoveResultType {
-        let from = long_algebraic_notation.get(0..2);
-        let to = long_algebraic_notation.get(2..4);
-
-        let game = self.game.as_mut().unwrap();
-
-        let promotion = long_algebraic_notation
-            .get(4..5)
-            .and_then(|promotion| promotion.chars().next())
-            .and_then(|char| Piece::from_char(char));
-
-        match (
-            from.and_then(BoardSquare::parse),
-            to.and_then(BoardSquare::parse),
-        ) {
-            (Some(from), Some(to)) => game.try_move_piece(BoardMove {
-                from,
-                to,
-                promotion,
-            }),
-            (_, _) => MoveResultType::InvalidNotation,
+        match BoardMove::parse(long_algebraic_notation.as_str()) {
+            Some(board_move) => self.game.try_make_move(board_move),
+            None => MoveResultType::InvalidNotation,
         }
     }
 
     pub fn get_valid_moves(&self, depth: usize) -> Vec<(BoardMove, usize)> {
-        vec![]
+        let mut moves = vec![];
+
+        for x in 0..8 {
+            for y in 0..8 {
+
+                let valid_bitmap = self.game.get_valid_move_bitboard(&BoardSquare { x, y });
+
+                for x2 in 0..8 {
+                    for y2 in 0..8 {
+                        let to = BoardSquare { x: x2, y: y2 };
+
+                        // TODO: pawn promotions
+                        if valid_bitmap & to.to_mask() != 0 {
+                            moves.push(
+                                (
+                                    BoardMove {
+                                        from: BoardSquare { x, y },
+                                        to,
+                                        promotion: None
+                                    },
+                                    1
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        moves
     }
 }

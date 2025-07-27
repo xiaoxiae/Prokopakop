@@ -3,8 +3,9 @@ mod game;
 mod test;
 mod utils;
 
+use std::num::ParseIntError;
 pub use crate::controller::*;
-use crate::game::MoveResultType;
+use crate::game::{BoardSquare, MoveResultType};
 pub use crate::utils::*;
 
 fn main() {
@@ -23,15 +24,6 @@ fn main() {
                 None => controller.new_game(None),
                 Some(fen) => controller.new_game(Some(fen.as_str())),
             },
-            (Some(GUICommand::ValidMoves(depth)), true) => {
-                let moves = controller.get_valid_moves(*depth);
-
-                for (m, c) in &moves {
-                    println!("{}: {}", m.unparse(), c);
-                }
-
-                println!("\nNodes: {}", moves.len());
-            },
             _ => {}
         }
 
@@ -39,7 +31,15 @@ fn main() {
             // UCI-only commands
             Some(Mode::UCI) => match input {
                 Some(GUICommand::IsReady) => respond(BotCommand::ReadyOk),
+                Some(GUICommand::ValidMoves(depth_string)) => {
+                    let moves = controller.get_valid_moves(depth_string.parse::<usize>().unwrap());
 
+                    for (m, c) in &moves {
+                        println!("{}: {}", m.unparse(), c);
+                    }
+
+                    println!("\nNodes: {}", moves.len());
+                }
                 _ => {}
             },
             // Player-only commands
@@ -48,11 +48,26 @@ fn main() {
                     let result = controller.try_move_piece(notation);
 
                     match result {
-                        MoveResultType::Success => controller.print(),
+                        MoveResultType::Success => controller.print(None),
                         _ => log::info!("{:?}", result),
                     };
                 }
+                Some(GUICommand::ValidMoves(square_string)) => {
+                    match BoardSquare::parse(square_string.as_str()) {
+                        Some(square) => {
+                            let moves = controller.get_valid_moves(1);
 
+                            println!("{:?}", moves);
+                            
+                            controller.print(Some(moves.iter().map(|(m, _)| m)
+                                .filter(|m| m.from == square)
+                                .map(|m| &m.to)
+                                .collect::<Vec<_>>()))
+                        }
+                        None => {}
+                    }
+                    
+                }
                 _ => {}
             },
             None => match input {
