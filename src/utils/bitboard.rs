@@ -11,11 +11,11 @@ pub trait BitboardExt {
 
 // used like this because we can't have a const fn as a trait,
 // but we want to use it for the compile-time bitmap calculation
-const fn position_to_bitmask(x: u32, y: u32) -> u64 {
+pub const fn position_to_bitmask(x: u32, y: u32) -> u64 {
     1u64 << x + y * 8
 }
 
-const fn is_position_valid(x: isize, y: isize) -> bool {
+pub const fn is_position_valid(x: isize, y: isize) -> bool {
     x >= 0 && x < 8 && y >= 0 && y < 8
 }
 

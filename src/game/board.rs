@@ -1,6 +1,9 @@
 use super::pieces::{Color, Piece};
 use crate::utils::Bitboard;
-use crate::{BitboardExt, PAWN_ATTACK_MOVE_BITBOARD, PAWN_FIRST_MOVE_BITBOARD, VALID_MOVE_BITBOARDS};
+use crate::{
+    BitboardExt, PAWN_ATTACK_MOVE_BITBOARD, PAWN_FIRST_MOVE_BITBOARD, VALID_MOVE_BITBOARDS,
+    position_to_bitmask,
+};
 use std::cmp::PartialEq;
 use strum::{EnumCount, IntoEnumIterator};
 
@@ -246,6 +249,27 @@ impl Game {
         self.pieces[board_move.to.y as usize][board_move.to.x as usize] = Some((piece, color));
         self.pieces[board_move.from.y as usize][board_move.from.x as usize] = None;
 
+        // if we moved to the en-passant bit, do the en-passant thingy
+        if self.en_passant_bitmap & board_move.to.to_mask() != 0 {
+            self.pieces[board_move.from.y as usize][board_move.to.x as usize] = None;
+
+            // TODO: other bitmaps: these should be moved to some function idk
+        }
+
+        // En-passant bit for
+        if piece == Piece::Pawn
+            && (board_move.from.y == 1 || board_move.from.y == 6)
+            && (board_move.to.y == 3 || board_move.to.y == 4)
+        {
+            // TODO: maybe don't hardcode it like this?
+            self.en_passant_bitmap = position_to_bitmask(
+                board_move.from.x, // same as to
+                (board_move.from.y + board_move.to.y) / 2,
+            );
+        } else {
+            self.en_passant_bitmap = 0;
+        }
+
         // TODO
         // castling_flags: u8, // 0x0000QKqk, where kq/KQ is one if black/white king and queen
         // en_passant_bitmap: u64, // if a piece just moved for the first time, 1 will be left in its place
@@ -262,7 +286,7 @@ impl Game {
     pub fn get_valid_move_bitboard(&self, square: &BoardSquare) -> Bitboard {
         let (piece, color) = match self.pieces[square.y as usize][square.x as usize] {
             Some(v) => v,
-            None => return 0
+            None => return 0,
         };
 
         // Baseline valid moves bitmap
@@ -280,9 +304,9 @@ impl Game {
                 valid_moves |= PAWN_FIRST_MOVE_BITBOARD[self.turn as usize][square.to_index()];
             }
 
-            // Attack moves towards enemy pieces
+            // Attack moves towards enemy pieces (including en-passant)
             valid_moves |= PAWN_ATTACK_MOVE_BITBOARD[self.turn as usize][square.to_index()]
-                & self.color_bitboards[!self.turn as usize];
+                & (self.color_bitboards[!self.turn as usize] | self.en_passant_bitmap);
         }
 
         valid_moves.print(Some("Valid Moves"), None);
