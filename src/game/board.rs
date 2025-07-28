@@ -1,8 +1,8 @@
 use super::pieces::{Color, Piece};
 use crate::utils::Bitboard;
 use crate::{
-    BitboardExt, PAWN_ATTACK_MOVE_BITBOARD, PAWN_FIRST_MOVE_BITBOARD, VALID_MOVE_BITBOARDS,
-    position_to_bitmask,
+    BISHOP_BLOCKER_BITBOARD, BitboardExt, MAGIC_ENTRIES, MAGIC_TABLE, PAWN_ATTACK_MOVE_BITBOARD,
+    PAWN_FIRST_MOVE_BITBOARD, ROOK_BLOCKER_BITBOARD, VALID_MOVE_BITBOARDS, position_to_bitmask,
 };
 use std::cmp::PartialEq;
 use strum::{EnumCount, IntoEnumIterator};
@@ -235,6 +235,8 @@ impl Game {
     }
 
     pub fn make_move(&mut self, board_move: BoardMove) {
+        /// TODO: promotions
+
         let (piece, color) = self.pieces[board_move.from.y as usize][board_move.from.x as usize]
             .expect("No piece at source square");
 
@@ -279,7 +281,6 @@ impl Game {
     /// Generate a bitboard that contains valid moves for a particular square,
     /// assuming the current game state.
     /// TODO: magic bitboards for occlusions
-    /// TODO: en-passant
     /// TODO: pins
     /// TODO: castling
     ///
@@ -289,27 +290,47 @@ impl Game {
             None => return 0,
         };
 
+        let index = square.to_index();
+
         // Baseline valid moves bitmap
-        let mut valid_moves =
-            VALID_MOVE_BITBOARDS[self.turn as usize][piece as usize][square.to_index()];
+        let mut valid_moves = VALID_MOVE_BITBOARDS[self.turn as usize][piece as usize][index];
 
         // Can't capture own pieces
         valid_moves &= !self.color_bitboards[color as usize];
+
+        // Magic bitboards for calculating blockers
+        if piece == Piece::Rook || piece == Piece::Bishop {
+            // first calculate the key
+            let (blocker_bitboard, offset) = match piece {
+                Piece::Rook => (ROOK_BLOCKER_BITBOARD[index], 0),
+                Piece::Bishop => (BISHOP_BLOCKER_BITBOARD[index], 64),
+                _ => unreachable!(),
+            };
+
+            let key = blocker_bitboard & (self.color_bitboards[0] | self.color_bitboards[1]);
+
+            // then, given the magic table information
+            let (magic_number, table_offset, bit_offset) = MAGIC_TABLE[offset + index];
+
+            // we calculate the opacity bitmap
+            let opacity_bitmap = MAGIC_ENTRIES
+                [table_offset + (magic_number.wrapping_mul(key) >> bit_offset) as usize];
+
+            valid_moves &= opacity_bitmap;
+        }
 
         // If pawn
         if piece == Piece::Pawn {
             // First moves
             // TODO: maybe don't hardcode it like this?
             if square.y == 1 || square.y == 6 {
-                valid_moves |= PAWN_FIRST_MOVE_BITBOARD[self.turn as usize][square.to_index()];
+                valid_moves |= PAWN_FIRST_MOVE_BITBOARD[self.turn as usize][index];
             }
 
             // Attack moves towards enemy pieces (including en-passant)
-            valid_moves |= PAWN_ATTACK_MOVE_BITBOARD[self.turn as usize][square.to_index()]
+            valid_moves |= PAWN_ATTACK_MOVE_BITBOARD[self.turn as usize][index]
                 & (self.color_bitboards[!self.turn as usize] | self.en_passant_bitmap);
         }
-
-        valid_moves.print(Some("Valid Moves"), None);
 
         valid_moves
     }
@@ -317,9 +338,6 @@ impl Game {
     pub fn try_make_move(&mut self, board_move: BoardMove) -> MoveResultType {
         let from_bitmask = board_move.from.to_mask();
         let to_bitmask = board_move.to.to_mask();
-
-        from_bitmask.print(Some("From Bitmask"), None);
-        to_bitmask.print(Some("To Bitmask"), None);
 
         // source is empty/doesn't match the color of the piece
         match self.pieces[board_move.from.y as usize][board_move.from.x as usize] {

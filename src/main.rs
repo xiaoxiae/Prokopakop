@@ -3,9 +3,8 @@ mod game;
 mod test;
 mod utils;
 
-use std::num::ParseIntError;
 pub use crate::controller::*;
-use crate::game::{BoardSquare, MoveResultType};
+use crate::game::{BoardSquare, MoveResultType, Piece};
 pub use crate::utils::*;
 
 fn main() {
@@ -24,6 +23,54 @@ fn main() {
                 None => controller.new_game(None),
                 Some(fen) => controller.new_game(Some(fen.as_str())),
             },
+            (Some(GUICommand::Magic), _) => {
+                let mut magic_bitboards: MagicBitboards = Default::default();
+
+                // Rook magic numbers
+                for y in 0..8 {
+                    for x in 0..8 {
+                        let index = x + y * 8;
+                        let result = calculate_magic_bitboard(x, y, &Piece::Rook);
+
+                        log::debug!(
+                            "Rook ({}/{}): {:064b}, {}",
+                            index + 1,
+                            64,
+                            result.magic,
+                            64 - result.shift
+                        );
+
+                        magic_bitboards.push(result);
+                    }
+                }
+
+                // Bishop magic numbers
+                for y in 0..8 {
+                    for x in 0..8 {
+                        let index = x + y * 8;
+                        let result = calculate_magic_bitboard(x, y, &Piece::Bishop);
+
+                        log::debug!(
+                            "Bishop ({}/{}): {:064b}, {}",
+                            index + 1,
+                            64,
+                            result.magic,
+                            64 - result.shift
+                        );
+
+                        magic_bitboards.push(result);
+                    }
+                }
+
+                log::debug!("Magic bitboards generated!");
+
+                // We're bootstrapping babyyyyy
+                serialize_magic_bitboards_to_file_flat(
+                    &magic_bitboards,
+                    concat!("src/utils/magic.rs"),
+                )
+                .expect("TODO: panic message");
+            }
             _ => {}
         }
 
@@ -57,16 +104,17 @@ fn main() {
                         Some(square) => {
                             let moves = controller.get_valid_moves(1);
 
-                            println!("{:?}", moves);
-                            
-                            controller.print(Some(moves.iter().map(|(m, _)| m)
-                                .filter(|m| m.from == square)
-                                .map(|m| &m.to)
-                                .collect::<Vec<_>>()))
+                            controller.print(Some(
+                                moves
+                                    .iter()
+                                    .map(|(m, _)| m)
+                                    .filter(|m| m.from == square)
+                                    .map(|m| &m.to)
+                                    .collect::<Vec<_>>(),
+                            ))
                         }
                         None => {}
                     }
-                    
                 }
                 _ => {}
             },

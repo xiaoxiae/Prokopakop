@@ -14,6 +14,9 @@ pub(crate) enum GUICommand {
     Position(Option<String>), // `position` for both
     ValidMoves(String),       // `go perf <depth>` for UCI, `moves` for player,
     Quit,                     // quit the program
+
+    // Miscellaneous
+    Magic, // look for magic numbers
 }
 
 pub(crate) enum BotCommand {
@@ -46,6 +49,7 @@ pub(crate) fn receive() -> Option<GUICommand> {
         ["go", "perft", depth] | ["moves", depth] => Some(ValidMoves(depth.to_string())),
         ["play"] => Some(GUICommand::Play),
         ["quit"] => Some(GUICommand::Quit),
+        ["magic"] => Some(GUICommand::Magic),
         ["move", notation] => Some(GUICommand::Move(notation.to_string())),
         _ => None,
     }

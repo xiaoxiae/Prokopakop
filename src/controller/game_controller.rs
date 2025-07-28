@@ -1,3 +1,4 @@
+use crate::BitboardExt;
 use crate::game::{BoardMove, BoardSquare, Color, Game, MoveResultType, Piece};
 
 pub enum Mode {
