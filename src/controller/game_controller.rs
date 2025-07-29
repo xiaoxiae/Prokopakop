@@ -47,7 +47,7 @@ impl GameController {
         for y in (0..8).rev() {
             let mut line = String::new();
             for x in 0..8 {
-                let is_light_square = (x + y) % 2 == 0;
+                let is_light_square = (x + y) % 2 == 1;
                 let bg_color = if is_light_square {
                     LIGHT_SQUARE_BG
                 } else {
