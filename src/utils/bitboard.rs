@@ -5,7 +5,6 @@ use std::io::{Result, Write};
 use std::path::Path;
 use strum::EnumCount;
 
-
 pub type Bitboard = u64;
 
 pub trait BitboardExt {
@@ -282,6 +281,8 @@ pub const ROOK_BLOCKER_BITBOARD: PieceBitboards =
 pub const BISHOP_BLOCKER_BITBOARD: PieceBitboards =
     calculate_blocker_bitboards(get_piece_deltas(&Piece::Bishop, 0));
 
+pub const CASTLING_BITBOARDS: [Bitboard; 4] = [0b00000000, 0b00100000, 0b00000010, 0b00100010];
+
 pub struct MagicBitboardEntry {
     pub magic: u64,
     pub shift: u8,
@@ -390,7 +391,7 @@ pub fn serialize_magic_bitboards_to_file_flat<P: AsRef<Path>>(
     let mut file = File::create(output_path)?;
 
     // Calculate total entries and build combined magic table
-    let mut all_entries: Vec<u64>  = Vec::new();
+    let mut all_entries: Vec<u64> = Vec::new();
     let mut magic_table = Vec::new();
     let mut current_offset = 0;
 
@@ -400,7 +401,10 @@ pub fn serialize_magic_bitboards_to_file_flat<P: AsRef<Path>>(
         current_offset += entry.entries.len();
     }
 
-    writeln!(file, "// This file is auto-generated. Do not edit manually.")?;
+    writeln!(
+        file,
+        "// This file is auto-generated. Do not edit manually."
+    )?;
     writeln!(file, "use crate::Bitboard;")?;
     writeln!(file)?;
 
@@ -416,7 +420,11 @@ pub fn serialize_magic_bitboards_to_file_flat<P: AsRef<Path>>(
     writeln!(file, "];")?;
     writeln!(file)?;
 
-    writeln!(file, "pub const MAGIC_ENTRIES: [Bitboard; {}] = [", all_entries.len())?;
+    writeln!(
+        file,
+        "pub const MAGIC_ENTRIES: [Bitboard; {}] = [",
+        all_entries.len()
+    )?;
     for (i, entry) in all_entries.iter().enumerate() {
         write!(file, "    {:#018x}", entry)?;
         if i < all_entries.len() - 1 {

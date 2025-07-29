@@ -98,7 +98,7 @@ impl GameController {
                     for y2 in 0..8 {
                         let to = BoardSquare { x: x2, y: y2 };
 
-                        // TODO: pawn promotions
+                        // TODO: correctly count pawn promotions
                         if valid_bitmap & to.to_mask() != 0 {
                             moves.push(
                                 (

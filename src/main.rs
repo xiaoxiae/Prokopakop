@@ -132,6 +132,7 @@ fn main() {
                     respond(BotCommand::PlayOk);
 
                     controller.initialize(Mode::Player);
+                    controller.print(None)
                 }
                 _ => {}
             },

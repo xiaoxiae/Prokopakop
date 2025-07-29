@@ -36,7 +36,7 @@ impl BoardSquare {
     }
 
     pub fn unparse(&self) -> String {
-        format!("{}{}", self.x as u8 + b'a' as u8, self.y as u8 + b'1' as u8)
+        format!("{}{}", (self.x as u8 + b'a' as u8) as char, (self.y as u8 + b'1' as u8) as char)
     }
 
     pub fn to_mask(&self) -> Bitboard {
@@ -107,7 +107,7 @@ pub struct Game {
 
     pub pieces: PieceBoard,
 
-    pub castling_flags: u8, // 0x0000QKqk, where kq/KQ is one if black/white king and queen
+    pub castling_flags: u8, // 0x0000KQkq, where kq/KQ is one if black/white king and queen
     pub en_passant_bitmap: Bitboard, // if a piece just moved for the first time, 1 will be over the square
 
     pub color_bitboards: [Bitboard; 2],
@@ -235,57 +235,88 @@ impl Game {
         }
     }
 
+    fn unset_piece(&mut self, square: &BoardSquare) {
+        if let Some((piece, color)) = self.pieces[square.y as usize][square.x as usize] {
+            let mask = square.to_mask();
+
+            // nuke piece/color
+            self.piece_bitboards[piece as usize] &= !mask;
+            self.color_bitboards[color as usize] &= !mask;
+            self.pieces[square.y as usize][square.x as usize] = None;
+        }
+    }
+
+    fn set_piece(&mut self, square: &BoardSquare, piece: Piece, color: Color) {
+        self.unset_piece(square);
+
+        // then do the actual placing
+        self.piece_bitboards[piece as usize] |= square.to_mask();
+        self.color_bitboards[color as usize] |= square.to_mask();
+        self.pieces[square.y as usize][square.x as usize] = Some((piece, color));
+    }
+
     pub fn unmake_move(&mut self, board_move: BoardMove) {
         unimplemented!()
     }
 
     pub fn make_move(&mut self, board_move: BoardMove) {
-        /// TODO: promotions
-
-        let (piece, color) = self.pieces[board_move.from.y as usize][board_move.from.x as usize]
+        let (mut piece, color) = self.pieces[board_move.from.y as usize]
+            [board_move.from.x as usize]
             .expect("No piece at source square");
 
-        // move on bitboards
-        self.piece_bitboards[piece as usize] &= !board_move.from.to_mask();
-        self.piece_bitboards[piece as usize] |= board_move.to.to_mask();
+        self.unset_piece(&board_move.from);
 
-        self.color_bitboards[self.turn as usize] &= !board_move.from.to_mask();
-        self.color_bitboards[self.turn as usize] |= board_move.to.to_mask();
+        // if we reach the last rank, promote!
+        if board_move.to.y == 7 && color == Color::White
+            || board_move.to.y == 0 && color == Color::Black
+        {
+            piece = board_move.promotion.unwrap();
+        }
 
-        // move the piece itself
-        self.pieces[board_move.to.y as usize][board_move.to.x as usize] = Some((piece, color));
-        self.pieces[board_move.from.y as usize][board_move.from.x as usize] = None;
+        self.set_piece(&board_move.to, piece, color);
 
         // if we moved to the en-passant bit, do the en-passant thingy
         if self.en_passant_bitmap & board_move.to.to_mask() != 0 {
-            self.pieces[board_move.from.y as usize][board_move.to.x as usize] = None;
-
-            // TODO: other bitmaps: these should be moved to some function idk
+            self.unset_piece(&BoardSquare {
+                x: board_move.to.x,
+                y: board_move.from.y,
+            })
         }
 
-        // En-passant bit for
+        // set en-passant bit if pawn en-passanted
         if piece == Piece::Pawn
             && (board_move.from.y == 1 || board_move.from.y == 6)
             && (board_move.to.y == 3 || board_move.to.y == 4)
         {
-            // TODO: maybe don't hardcode it like this?
-            self.en_passant_bitmap = position_to_bitmask(
-                board_move.from.x, // same as to
-                (board_move.from.y + board_move.to.y) / 2,
-            );
+            self.en_passant_bitmap =
+                position_to_bitmask(board_move.from.x, (board_move.from.y + board_move.to.y) / 2);
         } else {
             self.en_passant_bitmap = 0;
         }
 
-        // TODO
-        // castling_flags: u8, // 0x0000QKqk, where kq/KQ is one if black/white king and queen
-        // en_passant_bitmap: u64, // if a piece just moved for the first time, 1 will be left in its place
+        // TODO castling_flags: u8, // 0x0000QKqk, where kq/KQ is one if black/white king and queen
+    }
+
+    pub fn get_occlusion(&self, index: usize, piece: Piece) -> Bitboard {
+        // first calculate the key
+        let (blocker_bitboard, offset) = match piece {
+            Piece::Rook => (ROOK_BLOCKER_BITBOARD[index], 0),
+            Piece::Bishop => (BISHOP_BLOCKER_BITBOARD[index], 64),
+            _ => unreachable!(),
+        };
+
+        let key = blocker_bitboard & (self.color_bitboards[0] | self.color_bitboards[1]);
+
+        // then, given the magic table information...
+        let (magic_number, table_offset, bit_offset) = MAGIC_TABLE[offset + index];
+
+        // ... obtain calculate the blocker bitboard
+        MAGIC_ENTRIES[table_offset + (magic_number.wrapping_mul(key) >> bit_offset) as usize]
     }
 
     ///
     /// Generate a bitboard that contains valid moves for a particular square,
     /// assuming the current game state.
-    /// TODO: magic bitboards for occlusions
     /// TODO: pins
     /// TODO: castling
     ///
@@ -295,6 +326,11 @@ impl Game {
             None => return 0,
         };
 
+        // Can't play as an opposing piece
+        if color != self.turn {
+            return 0;
+        }
+
         let index = square.to_index();
 
         // Baseline valid moves bitmap
@@ -303,38 +339,31 @@ impl Game {
         // Can't capture own pieces
         valid_moves &= !self.color_bitboards[color as usize];
 
-        // Magic bitboards for calculating blockers
-        if piece == Piece::Rook || piece == Piece::Bishop {
-            // first calculate the key
-            let (blocker_bitboard, offset) = match piece {
-                Piece::Rook => (ROOK_BLOCKER_BITBOARD[index], 0),
-                Piece::Bishop => (BISHOP_BLOCKER_BITBOARD[index], 64),
-                _ => unreachable!(),
-            };
+        match piece {
+            // Pawn stuff
+            Piece::Pawn => {
+                // First moves apply when 1st or 6th rank
+                if square.y == 1 || square.y == 6 {
+                    valid_moves |= PAWN_FIRST_MOVE_BITBOARD[self.turn as usize][index];
+                }
 
-            let key = blocker_bitboard & (self.color_bitboards[0] | self.color_bitboards[1]);
-
-            // then, given the magic table information
-            let (magic_number, table_offset, bit_offset) = MAGIC_TABLE[offset + index];
-
-            // we calculate the opacity bitmap
-            let opacity_bitmap = MAGIC_ENTRIES
-                [table_offset + (magic_number.wrapping_mul(key) >> bit_offset) as usize];
-
-            valid_moves &= opacity_bitmap;
-        }
-
-        // If pawn
-        if piece == Piece::Pawn {
-            // First moves
-            // TODO: maybe don't hardcode it like this?
-            if square.y == 1 || square.y == 6 {
-                valid_moves |= PAWN_FIRST_MOVE_BITBOARD[self.turn as usize][index];
+                // Attack moves towards enemy pieces (including en-passant)
+                valid_moves |= PAWN_ATTACK_MOVE_BITBOARD[self.turn as usize][index]
+                    & (self.color_bitboards[!self.turn as usize] | self.en_passant_bitmap);
             }
+            // Magic bitboard stuff
+            Piece::Bishop | Piece::Rook => {
+                let opacity_bitmap = self.get_occlusion(index, piece);
+                valid_moves &= opacity_bitmap;
+            }
+            Piece::Queen => {
+                // For queen, it's combined
+                let opacity_bitmap = self.get_occlusion(index, Piece::Rook)
+                    | self.get_occlusion(index, Piece::Bishop);
 
-            // Attack moves towards enemy pieces (including en-passant)
-            valid_moves |= PAWN_ATTACK_MOVE_BITBOARD[self.turn as usize][index]
-                & (self.color_bitboards[!self.turn as usize] | self.en_passant_bitmap);
+                valid_moves &= opacity_bitmap;
+            }
+            _ => {}
         }
 
         valid_moves

@@ -68,7 +68,7 @@ fn test_perft_positions() {
         controller.new_game(Some(position_fen));
 
         for &(depth, expected_count) in depth_counts {
-            let start_time = std::time::Instant::now();
+            let start_time = Instant::now();
             let moves = controller.get_valid_moves(depth);
             let elapsed = start_time.elapsed();
 
@@ -94,7 +94,12 @@ fn test_perft_positions() {
     // Panic at the end with all failure information
     if !failures.is_empty() {
         let failure_summary = failures.join("\n  ");
-        panic!("Perft test failed with {}/{} error(s):\n  {}", failures.len(), total, failure_summary);
+        panic!(
+            "Perft test failed with {}/{} error(s):\n  {}",
+            failures.len(),
+            total,
+            failure_summary
+        );
     }
 }
 
