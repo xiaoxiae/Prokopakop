@@ -7,7 +7,7 @@ use crate::{
 use std::cmp::PartialEq;
 use strum::{EnumCount, IntoEnumIterator};
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Copy, Clone)]
 // TODO: to u8
 pub struct BoardSquare {
     pub x: u32,
@@ -51,6 +51,13 @@ impl BoardSquare {
     pub fn to_index(&self) -> usize {
         self.x as usize + self.y as usize * 8
     }
+
+    pub fn from_index(index: u64) -> BoardSquare {
+        BoardSquare {
+            x: (index % 8) as u32,
+            y: (index / 8) as u32,
+        }
+    }
 }
 
 impl BoardMove {
@@ -90,6 +97,42 @@ impl BoardMove {
                 .and_then(|p| Some(p.to_char().to_string()))
                 .unwrap_or("".to_string())
         )
+    }
+}
+
+pub struct ValidMovesIterator {
+    bitboard: Bitboard,
+    square: BoardSquare,
+
+    // TODO: promotions
+}
+
+impl Iterator for ValidMovesIterator {
+    type Item = BoardMove;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        // out of moves!
+        if self.bitboard == 0 {
+            return None;
+        }
+
+        let to_index = self.bitboard.trailing_zeros() as u64;
+        let to_square = BoardSquare::from_index(to_index);
+
+
+
+        self.bitboard &= self.bitboard - 1;
+
+        Some(BoardMove {
+            from: self.square.clone(),
+            to: to_square,
+            promotion: None,
+        })
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let count = self.bitboard.count_ones() as usize;
+        (count, Some(count))
     }
 }
 
@@ -384,7 +427,7 @@ impl Game {
     /// TODO: don't move into check
     /// TODO: prevent check
     ///
-    pub fn get_valid_move_bitboard(&self, square: &BoardSquare) -> Bitboard {
+    pub fn get_square_valid_move_bitboard(&self, square: &BoardSquare) -> Bitboard {
         let (piece, color) = match self.pieces[square.y as usize][square.x as usize] {
             Some(v) => v,
             None => return 0,
@@ -439,30 +482,12 @@ impl Game {
         valid_moves
     }
 
-    // TODO: nuke this entire function, it's dumb
-    pub fn try_make_move(&mut self, board_move: BoardMove) -> MoveResultType {
-        let from_bitmask = board_move.from.to_mask();
-        let to_bitmask = board_move.to.to_mask();
+    pub fn get_square_valid_moves(&self, square: &BoardSquare) -> ValidMovesIterator {
+        let bitboard = self.get_square_valid_move_bitboard(square);
 
-        // source is empty/doesn't match the color of the piece
-        match self.pieces[board_move.from.y as usize][board_move.from.x as usize] {
-            Some((piece, color)) => {
-                if color != self.turn {
-                    return MoveResultType::WrongSource;
-                }
-
-                // Baseline valid moves bitmap
-                let valid_moves = self.get_valid_move_bitboard(&board_move.from);
-
-                // Not a valid destination square
-                if valid_moves & to_bitmask == 0 {
-                    return MoveResultType::WrongDestination;
-                }
-
-                self.make_move(board_move);
-                MoveResultType::Success
-            }
-            None => MoveResultType::WrongSource,
+        ValidMovesIterator {
+            square: square.clone(),
+            bitboard,
         }
     }
 }

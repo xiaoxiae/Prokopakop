@@ -84,7 +84,24 @@ impl GameController {
 
     pub fn try_move_piece(&mut self, long_algebraic_notation: String) -> MoveResultType {
         match BoardMove::parse(long_algebraic_notation.as_str()) {
-            Some(board_move) => self.game.try_make_move(board_move),
+            Some(board_move) => {
+                if self.game.color_bitboards[self.game.turn as usize] & board_move.from.to_mask()
+                    == 0
+                {
+                    return MoveResultType::WrongSource;
+                }
+
+                // Baseline valid moves bitmap
+                let valid_moves = self.game.get_square_valid_move_bitboard(&board_move.from);
+
+                // Not a valid destination square
+                if valid_moves & board_move.to.to_mask() == 0 {
+                    return MoveResultType::WrongDestination;
+                }
+
+                self.game.make_move(board_move);
+                MoveResultType::Success
+            }
             None => MoveResultType::InvalidNotation,
         }
     }
@@ -104,25 +121,11 @@ impl GameController {
 
         for x in 0..8 {
             for y in 0..8 {
-                let valid_bitmap = self.game.get_valid_move_bitboard(&BoardSquare { x, y });
-
-                for x2 in 0..8 {
-                    for y2 in 0..8 {
-                        let to = BoardSquare { x: x2, y: y2 };
-
-                        // TODO: correctly count pawn promotions
-                        if valid_bitmap & to.to_mask() != 0 {
-                            moves.push((
-                                BoardMove {
-                                    from: BoardSquare { x, y },
-                                    to,
-                                    promotion: None,
-                                },
-                                1,
-                            ))
-                        }
-                    }
-                }
+                moves.extend(
+                    self.game
+                        .get_square_valid_moves(&BoardSquare { x, y })
+                        .map(|s| (s, 1)),
+                )
             }
         }
 
