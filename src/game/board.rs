@@ -560,15 +560,27 @@ impl Game {
                 //   - it's only necessary to look at rooks/bishops, others aren't sliding (pawns, kings, knights)
                 //   - once we have this, we can just end valid moves and we're good
 
+                // get occlusion to the left/right side of king and use it to mask the castling bit
+                let castling_blockers = (valid_moves
+                    & (self.color_bitboards[0] | self.color_bitboards[1]))
+                    >> (color as usize ^ 1) * 56;
+
+                let castling_blocker_bits =
+                    (!((castling_blockers >> 4) | (castling_blockers >> 3))) & 0b11;
+
                 // castling bits for the particular color
-                let castling_bits = self.castling_flags >> (color as usize * 2) & 0b11;
+                let castling_bits =
+                    self.castling_flags >> (color as usize * 2) & castling_blocker_bits as u8;
 
                 // fun optimization -- multiplying by 9 yields the correct bitboards:
                 // 0b00 * 9 -> b00000
                 // 0b01 * 9 -> b01001
                 // 0b10 * 9 -> b10010
                 // 0b11 * 9 -> b11011
-                valid_moves |= (castling_bits as u64 * 9 << 2) << ((color as usize ^ 1) * 56);
+                valid_moves |=
+                    (castling_bits as u64 * 9 << 2) << ((color as usize ^ 1) * 56)
+                    & !(self.color_bitboards[0] | self.color_bitboards[1])
+                ;
             }
             _ => {}
         }
