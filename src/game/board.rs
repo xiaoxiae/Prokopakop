@@ -58,6 +58,11 @@ impl BoardMove {
             .and_then(|promotion| promotion.chars().next())
             .and_then(|char| Piece::from_char(char));
 
+        // Can't promote to a king...
+        if promotion.is_some_and(|p| p == Piece::King) {
+            return None;
+        }
+
         match (
             from.and_then(BoardSquare::parse),
             to.and_then(BoardSquare::parse),
