@@ -177,7 +177,7 @@ pub enum MoveResultType {
 
 #[derive(Debug)]
 pub struct Game {
-    pub turn: Color,
+    pub side: Color,
 
     pub pieces: PieceBoard,
 
@@ -245,7 +245,7 @@ impl Game {
             y += 1;
         }
 
-        let turn = match parts.next() {
+        let side = match parts.next() {
             Some("w") => Color::White,
             Some("b") => Color::Black,
             _ => panic!("Incorrect FEN format"),
@@ -284,7 +284,7 @@ impl Game {
         }
 
         let mut halfmoves = fullmoves * 2;
-        if turn == Color::Black {
+        if side == Color::Black {
             halfmoves += 1;
         }
 
@@ -310,7 +310,7 @@ impl Game {
 
         Game {
             color_bitboards,
-            turn,
+            side,
             pieces,
             castling_flags,
             en_passant_bitmap,
@@ -396,7 +396,7 @@ impl Game {
             self.en_passant_bitmap = 0;
         }
 
-        self.turn = !self.turn;
+        self.side = !self.side;
         self.halfmoves -= 1;
 
         // TODO: half-moves since last capture

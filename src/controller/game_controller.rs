@@ -84,7 +84,7 @@ impl GameController {
     pub fn try_move_piece(&mut self, long_algebraic_notation: String) -> MoveResultType {
         match BoardMove::parse(long_algebraic_notation.as_str()) {
             Some(board_move) => {
-                if self.game.color_bitboards[self.game.turn as usize] & board_move.from.to_mask()
+                if self.game.color_bitboards[self.game.side as usize] & board_move.from.to_mask()
                     == 0
                 {
                     return MoveResultType::WrongSource;
