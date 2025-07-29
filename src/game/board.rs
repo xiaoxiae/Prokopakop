@@ -364,6 +364,24 @@ impl Game {
         // restore bitmaps
         self.castling_flags = castling_flags_copy;
 
+        // uncastle
+        if piece == Piece::King && board_move.from.x.abs_diff(board_move.to.x) == 2 {
+            self.set_piece(
+                &BoardSquare {
+                    // bit hack: the to X position is either 2 (0b10) or 6 (0b110),
+                    // so >> gives us a flag whether it's the first or last file
+                    x: (board_move.to.x >> 2) * 7,
+                    y: board_move.from.y,
+                },
+                (Piece::Rook, color),
+            );
+
+            self.unset_piece(&BoardSquare {
+                x: (board_move.from.x + board_move.to.x) / 2,
+                y: board_move.from.y,
+            });
+        }
+
         // if pawn moves in a cross manner and doesn't capture piece, en-passant happened
         if piece == Piece::Pawn && captured_piece.is_none() && board_move.to.x != board_move.from.x
         {
@@ -381,7 +399,6 @@ impl Game {
         self.turn = !self.turn;
         self.halfmoves -= 1;
 
-        // TODO: castling -- if king moved 2 pieces, flipped
         // TODO: half-moves since last capture
     }
 
@@ -429,11 +446,46 @@ impl Game {
         self.history
             .push((board_move, captured_piece, castling_flags_copy));
 
-        self.turn = !self.turn;
+        self.side = !self.side;
         self.halfmoves += 1;
 
-        // TODO update castling flags
-        // TODO: castling
+        // rook moves & castling
+        if piece == Piece::Rook {
+            let i = match (color, board_move.from.x) {
+                (Color::Black, 0) => 1,
+                (Color::Black, 7) => 2,
+                (Color::White, 0) => 4,
+                (Color::White, 7) => 8,
+                _ => 0,
+            };
+
+            self.castling_flags &= !i;
+        }
+
+        // king moves
+        if piece == Piece::King {
+            // castling (move by 2)
+            if board_move.from.x.abs_diff(board_move.to.x) == 2 {
+                self.unset_piece(&BoardSquare {
+                    // bit hack: the to X position is either 2 (0b10) or 6 (0b110),
+                    // so >> gives us a flag whether it's the first or last file
+                    x: (board_move.to.x >> 2) * 7,
+                    y: board_move.from.y,
+                });
+
+                self.set_piece(
+                    &BoardSquare {
+                        x: (board_move.from.x + board_move.to.x) / 2,
+                        y: board_move.from.y,
+                    },
+                    (Piece::Rook, color),
+                );
+            }
+
+            // either way no more castling for this side
+            self.castling_flags &= !(0b11 << (2 * color as usize));
+        }
+
         // TODO: half-moves since last capture
     }
 
@@ -458,12 +510,12 @@ impl Game {
     /// Generate a bitboard that contains valid moves for a particular square,
     /// assuming the current game state.
     /// TODO: pins
-    /// TODO: castling
-    /// TODO: don't move into check
+    /// TODO: don't move into check (also during castling!)
     /// TODO: prevent check
     ///
     pub fn get_square_valid_move_bitboard(&self, square: &BoardSquare) -> Bitboard {
         let index = square.to_index();
+        let mask = square.to_mask();
 
         let (piece, color) = match self.pieces[index] {
             Some(v) => v,
@@ -471,27 +523,24 @@ impl Game {
         };
 
         // Can't play as an opposing piece
-        if color != self.turn {
+        if color != self.side {
             return 0;
         }
 
         // Baseline valid moves bitmap
-        let mut valid_moves = VALID_MOVE_BITBOARDS[self.turn as usize][piece as usize][index];
-
-        // Can't capture own pieces
-        valid_moves &= !self.color_bitboards[color as usize];
+        let mut valid_moves = VALID_MOVE_BITBOARDS[self.side as usize][piece as usize][index];
 
         match piece {
             // Pawn stuff
             Piece::Pawn => {
                 // First moves apply when 1st or 6th rank
                 if square.y == 1 || square.y == 6 {
-                    valid_moves |= PAWN_FIRST_MOVE_BITBOARD[self.turn as usize][index];
+                    valid_moves |= PAWN_FIRST_MOVE_BITBOARD[self.side as usize][index];
                 }
 
                 // Attack moves towards enemy pieces (including en-passant)
-                valid_moves |= PAWN_ATTACK_MOVE_BITBOARD[self.turn as usize][index]
-                    & (self.color_bitboards[!self.turn as usize] | self.en_passant_bitmap);
+                valid_moves |= PAWN_ATTACK_MOVE_BITBOARD[self.side as usize][index]
+                    & (self.color_bitboards[!self.side as usize] | self.en_passant_bitmap);
             }
             // Magic bitboard stuff
             Piece::Bishop | Piece::Rook => {
@@ -505,14 +554,27 @@ impl Game {
 
                 valid_moves &= opacity_bitmap;
             }
-            // King stuff -- don't move into square under attack
+            // King stuff
             Piece::King => {
-                // TODO: check occlusions of enemy attackers and creae a bitmap with it
+                // TODO: check occlusions of enemy attackers and create a bitmap with it
                 //   - it's only necessary to look at rooks/bishops, others aren't sliding (pawns, kings, knights)
-                //   - once we have this, we can just end valid mowes and we're good
+                //   - once we have this, we can just end valid moves and we're good
+
+                // castling bits for the particular color
+                let castling_bits = self.castling_flags >> (color as usize * 2) & 0b11;
+
+                // fun optimization -- multiplying by 9 yields the correct bitboards:
+                // 0b00 * 9 -> b00000
+                // 0b01 * 9 -> b01001
+                // 0b10 * 9 -> b10010
+                // 0b11 * 9 -> b11011
+                valid_moves |= (castling_bits as u64 * 9 << 2) << ((color as usize ^ 1) * 56);
             }
             _ => {}
         }
+
+        // Can't ever capture / go through own pieces
+        valid_moves &= !self.color_bitboards[color as usize];
 
         valid_moves
     }
