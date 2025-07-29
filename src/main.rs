@@ -87,11 +87,13 @@ fn main() {
                 Some(GUICommand::ValidMoves(depth_string)) => {
                     let moves = controller.get_valid_moves(depth_string.parse::<usize>().unwrap());
 
+                    let mut total = 0;
                     for (m, c) in &moves {
                         println!("{}: {}", m.unparse(), c);
+                        total += c;
                     }
 
-                    println!("\nNodes: {}", moves.len());
+                    println!("\nNodes: {}", total);
                 }
                 _ => {}
             },
@@ -113,8 +115,9 @@ fn main() {
                         _ => log::info!("{:?}", result),
                     };
                 }
-                Some(GUICommand::ValidMoves(square_string)) => {
-                    match BoardSquare::parse(square_string.as_str()) {
+                Some(GUICommand::ValidMoves(square_or_depth_string)) => {
+                    // If parsing as move works, it has to be depth
+                    match BoardSquare::parse(square_or_depth_string.as_str()) {
                         Some(square) => {
                             let moves = controller.get_valid_moves(1);
 
@@ -127,7 +130,13 @@ fn main() {
                                     .collect::<Vec<_>>(),
                             ))
                         }
-                        None => {}
+                        None => {
+                            let moves = controller.get_valid_moves(square_or_depth_string.parse::<usize>().unwrap_or(1));
+
+                            for (m, c) in &moves {
+                                println!("{}: {}", m.unparse(), c);
+                            }
+                        }
                     }
                 }
                 _ => {}

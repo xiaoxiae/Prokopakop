@@ -3,11 +3,14 @@ use strum_macros::{EnumCount, EnumIter, FromRepr};
 
 #[derive(Copy, Clone, Debug, PartialEq, EnumIter, EnumCount, FromRepr)]
 pub enum Piece {
-    Pawn = 0,
-    Knight = 1,
-    Bishop = 2,
-    Rook = 3,
-    Queen = 4,
+    // Promoting pieces
+    Knight = 0,
+    Bishop = 1,
+    Rook = 2,
+    Queen = 3,
+
+    // Non-promoting pieces
+    Pawn = 4,
     King = 5,
 }
 
@@ -43,12 +46,12 @@ impl Piece {
 
     pub fn to_char(self) -> char {
         match self {
-            Piece::Pawn   => 'p',
+            Piece::Pawn => 'p',
             Piece::Knight => 'n',
             Piece::Bishop => 'b',
-            Piece::Rook   => 'r',
-            Piece::Queen  => 'q',
-            Piece::King   => 'k',
+            Piece::Rook => 'r',
+            Piece::Queen => 'q',
+            Piece::King => 'k',
         }
     }
 
@@ -64,3 +67,5 @@ impl Piece {
         }
     }
 }
+
+pub type ColoredPiece = (Piece, Color);

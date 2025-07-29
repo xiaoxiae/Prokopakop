@@ -1,4 +1,5 @@
 use super::pieces::{Color, Piece};
+use crate::game::ColoredPiece;
 use crate::utils::Bitboard;
 use crate::{
     BISHOP_BLOCKER_BITBOARD, BitboardExt, MAGIC_ENTRIES, MAGIC_TABLE, PAWN_ATTACK_MOVE_BITBOARD,
@@ -8,13 +9,14 @@ use std::cmp::PartialEq;
 use strum::{EnumCount, IntoEnumIterator};
 
 #[derive(Debug, Eq, PartialEq, Copy, Clone)]
-// TODO: to u8
+
+// TODO: should store the index instead of x/y
 pub struct BoardSquare {
     pub x: u32,
     pub y: u32,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub struct BoardMove {
     pub from: BoardSquare,
     pub to: BoardSquare,
@@ -70,8 +72,8 @@ impl BoardMove {
             .and_then(|promotion| promotion.chars().next())
             .and_then(|char| Piece::from_char(char));
 
-        // Can't promote to a king...
-        if promotion.is_some_and(|p| p == Piece::King) {
+        // Can't promote to a king or pawn
+        if promotion.is_some_and(|p| p == Piece::King || p == Piece::Pawn) {
             return None;
         }
 
@@ -104,7 +106,8 @@ pub struct ValidMovesIterator {
     bitboard: Bitboard,
     square: BoardSquare,
 
-    // TODO: promotions
+    is_promoting: bool,
+    current_promotion: usize,
 }
 
 impl Iterator for ValidMovesIterator {
@@ -119,15 +122,38 @@ impl Iterator for ValidMovesIterator {
         let to_index = self.bitboard.trailing_zeros() as u64;
         let to_square = BoardSquare::from_index(to_index);
 
+        if self.is_promoting {
+            // the first 4 are promoting pieces; if we get to 5, advance to next bit
+            let result;
+            if self.current_promotion == 5 {
+                self.current_promotion = 0;
+                self.bitboard &= self.bitboard - 1;
 
+                result = Some(BoardMove {
+                    from: self.square,
+                    to: to_square,
+                    promotion: Piece::from_repr(self.current_promotion),
+                });
+            } else {
+                result = Some(BoardMove {
+                    from: self.square,
+                    to: to_square,
+                    promotion: Piece::from_repr(self.current_promotion),
+                });
 
-        self.bitboard &= self.bitboard - 1;
+                self.current_promotion += 1;
+            }
 
-        Some(BoardMove {
-            from: self.square.clone(),
-            to: to_square,
-            promotion: None,
-        })
+            result
+        } else {
+            self.bitboard &= self.bitboard - 1;
+
+            Some(BoardMove {
+                from: self.square.clone(),
+                to: to_square,
+                promotion: None,
+            })
+        }
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -136,7 +162,7 @@ impl Iterator for ValidMovesIterator {
     }
 }
 
-pub type PieceBoard = [[Option<(Piece, Color)>; 8]; 8];
+pub type PieceBoard = [Option<ColoredPiece>; 64];
 
 #[derive(Debug)]
 pub enum MoveResultType {
@@ -153,7 +179,6 @@ pub enum MoveResultType {
 pub struct Game {
     pub turn: Color,
 
-    // TODO: flatten?
     pub pieces: PieceBoard,
 
     pub castling_flags: u8, // 0x0000KQkq, where kq/KQ is one if black/white king and queen
@@ -168,7 +193,7 @@ pub struct Game {
     // store the move, which piece was there, and en-passant + castling flags
     // you might think: can't we calculate the flags? NO!
     // - castling flag is needed, since there might be some fucky movement on the last rank back and forth
-    pub history: Vec<(BoardMove, Option<(Piece, Color)>, u8)>,
+    pub history: Vec<(BoardMove, Option<ColoredPiece>, u8)>,
 }
 
 impl Game {
@@ -180,7 +205,7 @@ impl Game {
         let mut color_bitboards: [Bitboard; 2] = [Bitboard::default(); 2];
         let mut piece_bitboards: [Bitboard; Piece::COUNT] = [Bitboard::default(); Piece::COUNT];
 
-        let mut pieces = PieceBoard::default();
+        let mut pieces = [None; 64];
 
         let mut y = 0u32;
         for rank in parts.next().unwrap().split('/') {
@@ -193,9 +218,10 @@ impl Game {
                     continue;
                 }
 
-                let reversed_y = pieces.len() - y as usize - 1;
+                let square = BoardSquare { x, y: 8 - y - 1 };
 
-                let bitmap = Bitboard::position_to_bitmask(x, reversed_y as u32);
+                let bitmap = square.to_mask();
+                let index = square.to_index();
 
                 let color = if char.is_ascii_uppercase() {
                     Color::White
@@ -208,7 +234,7 @@ impl Game {
                 match Piece::from_char(char.to_ascii_lowercase()) {
                     Some(piece) => {
                         piece_bitboards[piece as usize] |= bitmap;
-                        pieces[reversed_y][x as usize] = Some((piece, color));
+                        pieces[index] = Some((piece, color));
                     }
                     _ => {}
                 }
@@ -296,38 +322,43 @@ impl Game {
     }
 
     fn unset_piece(&mut self, square: &BoardSquare) {
-        if let Some((piece, color)) = self.pieces[square.y as usize][square.x as usize] {
+        let index = square.to_index();
+
+        if let Some((piece, color)) = self.pieces[index] {
             let mask = square.to_mask();
 
             // nuke piece/color
             self.piece_bitboards[piece as usize] &= !mask;
             self.color_bitboards[color as usize] &= !mask;
-            self.pieces[square.y as usize][square.x as usize] = None;
+            self.pieces[index] = None;
         }
     }
 
-    fn set_piece(&mut self, square: &BoardSquare, piece: Piece, color: Color) {
+    fn set_piece(&mut self, square: &BoardSquare, colored_piece: ColoredPiece) {
+        let index = square.to_index();
+
         self.unset_piece(square);
 
+        let mask = square.to_mask();
+
         // then do the actual placing
-        self.piece_bitboards[piece as usize] |= square.to_mask();
-        self.color_bitboards[color as usize] |= square.to_mask();
-        self.pieces[square.y as usize][square.x as usize] = Some((piece, color));
+        self.piece_bitboards[colored_piece.0 as usize] |= mask;
+        self.color_bitboards[colored_piece.1 as usize] |= mask;
+        self.pieces[index] = Some(colored_piece);
     }
 
     pub fn unmake_move(&mut self) {
         let (board_move, captured_piece, castling_flags_copy) = self.history.pop().unwrap();
 
         // move the piece back
-        let (piece, color) =
-            self.pieces[board_move.to.y as usize][board_move.to.x as usize].unwrap();
+        let colored_piece @ (piece, color) = self.pieces[board_move.to.to_index()].unwrap();
 
         self.unset_piece(&board_move.to);
-        self.set_piece(&board_move.from, piece, color);
+        self.set_piece(&board_move.from, colored_piece);
 
         // place the captured piece back
-        if let Some((c_piece, c_color)) = captured_piece {
-            self.set_piece(&board_move.to, c_piece, c_color);
+        if let Some(c_colored_piece) = captured_piece {
+            self.set_piece(&board_move.to, c_colored_piece);
         }
 
         // restore bitmaps
@@ -341,8 +372,10 @@ impl Game {
                 y: board_move.from.y,
             };
 
-            self.set_piece(&captured_pawn_square, Piece::Pawn, !color);
+            self.set_piece(&captured_pawn_square, (Piece::Pawn, !color));
             self.en_passant_bitmap = board_move.to.to_mask();
+        } else {
+            self.en_passant_bitmap = 0;
         }
 
         self.turn = !self.turn;
@@ -353,25 +386,27 @@ impl Game {
     }
 
     pub fn make_move(&mut self, board_move: BoardMove) {
-        let (mut piece, color) = self.pieces[board_move.from.y as usize]
-            [board_move.from.x as usize]
-            .expect("No piece at source square");
+        let from_index = board_move.from.to_index();
 
-        let captured_piece = self.pieces[board_move.to.y as usize][board_move.to.x as usize];
+        let (mut piece, color) = self.pieces[from_index].expect("No piece at source square");
+
+        let to_index = board_move.to.to_index();
+
+        let captured_piece = self.pieces[to_index];
 
         self.unset_piece(&board_move.from);
 
-        // if we reach the last rank, promote!
-        if board_move.to.y == 7 && color == Color::White
-            || board_move.to.y == 0 && color == Color::Black
-        {
-            piece = board_move.promotion.unwrap();
+        // if pawn reaches the last rank, promote!
+        if piece == Piece::Pawn && (board_move.to.y == 7 || board_move.to.y == 0) {
+            piece = board_move
+                .promotion
+                .expect("Pawn move to last rank must contain promotion information.");
         }
 
-        self.set_piece(&board_move.to, piece, color);
+        self.set_piece(&board_move.to, (piece, color));
 
-        // if we moved to the en-passant bit, do the en-passant thingy
-        if self.en_passant_bitmap & board_move.to.to_mask() != 0 {
+        // if we moved to the en-passant bit, with a pawn, take
+        if piece == Piece::Pawn && self.en_passant_bitmap & board_move.to.to_mask() != 0 {
             self.unset_piece(&BoardSquare {
                 x: board_move.to.x,
                 y: board_move.from.y,
@@ -428,7 +463,9 @@ impl Game {
     /// TODO: prevent check
     ///
     pub fn get_square_valid_move_bitboard(&self, square: &BoardSquare) -> Bitboard {
-        let (piece, color) = match self.pieces[square.y as usize][square.x as usize] {
+        let index = square.to_index();
+
+        let (piece, color) = match self.pieces[index] {
             Some(v) => v,
             None => return 0,
         };
@@ -437,8 +474,6 @@ impl Game {
         if color != self.turn {
             return 0;
         }
-
-        let index = square.to_index();
 
         // Baseline valid moves bitmap
         let mut valid_moves = VALID_MOVE_BITBOARDS[self.turn as usize][piece as usize][index];
@@ -483,11 +518,22 @@ impl Game {
     }
 
     pub fn get_square_valid_moves(&self, square: &BoardSquare) -> ValidMovesIterator {
+        let index = square.to_index();
+
         let bitboard = self.get_square_valid_move_bitboard(square);
+
+        // pawn on second to last rank with some valid moves must promote
+        let is_promoting = bitboard != 0
+            && self.pieces[index].is_some_and(|(p, c)| {
+                p == Piece::Pawn
+                    && (square.y == 6 && c == Color::White || square.y == 1 && c == Color::Black)
+            });
 
         ValidMovesIterator {
             square: square.clone(),
             bitboard,
+            is_promoting,
+            current_promotion: 0,
         }
     }
 }

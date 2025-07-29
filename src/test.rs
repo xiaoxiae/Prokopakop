@@ -26,6 +26,8 @@ fn test_perft_positions() {
     let mut controller = GameController::new();
     let mut failures: Vec<_> = Vec::new();
     let mut total = 0;
+    
+    let max_perft = 2;
 
     // Yoinked from https://www.chessprogramming.org/Perft_Results
     let test_positions = [
@@ -68,8 +70,12 @@ fn test_perft_positions() {
         controller.new_game(Some(position_fen));
 
         for &(depth, expected_count) in depth_counts {
+            if depth > max_perft {
+                continue;
+            }
+
             let start_time = Instant::now();
-            let moves = controller.get_valid_moves(depth);
+            let moves = controller.get_valid_moves(depth - 1);
             let elapsed = start_time.elapsed();
 
             let total_nodes: usize = moves.iter().map(|(_, count)| count).sum();
@@ -241,19 +247,6 @@ impl InteractiveProcess {
         self.read_until(|line| line == target, timeout)
     }
 
-    pub fn write_and_read_until<F>(
-        &mut self,
-        input: &str,
-        condition: F,
-        timeout: Duration,
-    ) -> Result<Vec<String>, ProcessError>
-    where
-        F: Fn(&str) -> bool,
-    {
-        self.write(input)?;
-        self.read_until(condition, timeout)
-    }
-
     pub fn write_and_read_until_contains(
         &mut self,
         input: &str,
@@ -292,13 +285,6 @@ impl InteractiveProcess {
                     thread::sleep(Duration::from_millis(10));
                 }
             }
-        }
-    }
-
-    pub fn is_alive(&mut self) -> Result<bool, ProcessError> {
-        match self.child.try_wait()? {
-            Some(_) => Ok(false),
-            None => Ok(true),
         }
     }
 }

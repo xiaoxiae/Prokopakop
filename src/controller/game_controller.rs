@@ -1,5 +1,4 @@
-use crate::BitboardExt;
-use crate::game::{BoardMove, BoardSquare, Color, Game, MoveResultType, Piece};
+use crate::game::{BoardMove, BoardSquare, Color, Game, MoveResultType};
 
 pub enum ControllerMode {
     UCI,
@@ -58,7 +57,7 @@ impl GameController {
                 };
                 line.push_str(bg_color);
 
-                match self.game.pieces[y][x] {
+                match self.game.pieces[x + y * 8] {
                     Some((piece, color)) => {
                         let piece_color = match color {
                             Color::White => WHITE_PIECE,
@@ -116,7 +115,21 @@ impl GameController {
         }
     }
 
-    pub fn get_valid_moves(&self, depth: usize) -> Vec<(BoardMove, usize)> {
+    pub fn get_valid_moves(&mut self, depth: usize) -> Vec<(BoardMove, usize)> {
+        let mut all_moves = vec![];
+
+        // Get all valid moves for the current position
+        let current_moves = self.get_current_position_moves();
+
+        for board_move in current_moves {
+            let move_count = self.dfs_count_moves(board_move.clone(), depth);
+            all_moves.push((board_move, move_count));
+        }
+
+        all_moves
+    }
+
+    fn get_current_position_moves(&self) -> Vec<BoardMove> {
         let mut moves = vec![];
 
         for x in 0..8 {
@@ -124,11 +137,35 @@ impl GameController {
                 moves.extend(
                     self.game
                         .get_square_valid_moves(&BoardSquare { x, y })
-                        .map(|s| (s, 1)),
-                )
+                );
             }
         }
 
         moves
+    }
+
+    fn dfs_count_moves(&mut self, initial_move: BoardMove, depth: usize) -> usize {
+        if depth == 0 {
+            return 1;
+        }
+
+        self.game.make_move(initial_move);
+
+        let mut total_count = 0;
+
+        let current_moves = self.get_current_position_moves();
+
+        if depth == 1 {
+            total_count = current_moves.len();
+        } else {
+            // Recursive case: explore each move further
+            for board_move in current_moves {
+                total_count += self.dfs_count_moves(board_move, depth - 1);
+            }
+        }
+
+        self.game.unmake_move();
+
+        total_count
     }
 }
