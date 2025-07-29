@@ -8,6 +8,7 @@ use std::cmp::PartialEq;
 use strum::{EnumCount, IntoEnumIterator};
 
 #[derive(Debug, Eq, PartialEq)]
+// TODO: to u8
 pub struct BoardSquare {
     pub x: u32,
     pub y: u32,
@@ -36,7 +37,11 @@ impl BoardSquare {
     }
 
     pub fn unparse(&self) -> String {
-        format!("{}{}", (self.x as u8 + b'a' as u8) as char, (self.y as u8 + b'1' as u8) as char)
+        format!(
+            "{}{}",
+            (self.x as u8 + b'a' as u8) as char,
+            (self.y as u8 + b'1' as u8) as char
+        )
     }
 
     pub fn to_mask(&self) -> Bitboard {
@@ -98,13 +103,14 @@ pub enum MoveResultType {
     WrongSource,      // invalid source (no piece / wrong color piece)
     WrongDestination, // invalid destination (occupied square, that piece can't move there)
 
-    MoveToCheck,
+    NoHistory, // can't undo -- no history
 }
 
 #[derive(Debug)]
 pub struct Game {
     pub turn: Color,
 
+    // TODO: flatten?
     pub pieces: PieceBoard,
 
     pub castling_flags: u8, // 0x0000KQkq, where kq/KQ is one if black/white king and queen
@@ -113,8 +119,13 @@ pub struct Game {
     pub color_bitboards: [Bitboard; 2],
     pub piece_bitboards: [Bitboard; Piece::COUNT],
 
-    pub halfmove_clock: u64, // how many halfmoves have been played since the last capture or pawn advance
-    pub fullmove_number: u64, // how many full moves have been played; incremented after black's move
+    pub halfmoves: usize,
+    pub halfmoves_since_capture: usize,
+
+    // store the move, which piece was there, and en-passant + castling flags
+    // you might think: can't we calculate the flags? NO!
+    // - castling flag is needed, since there might be some fucky movement on the last rank back and forth
+    pub history: Vec<(BoardMove, Option<(Piece, Color)>, u8)>,
 }
 
 impl Game {
@@ -191,8 +202,8 @@ impl Game {
             _ => panic!("FEN parsing failure: incorrect En Passant target square"),
         };
 
-        let halfmove_clock = parts.next().unwrap_or("0").parse().unwrap();
-        let fullmove_number = parts.next().unwrap_or("0").parse().unwrap();
+        let halfmoves_since_capture = parts.next().unwrap_or("0").parse::<usize>().unwrap();
+        let fullmoves = parts.next().unwrap_or("0").parse::<usize>().unwrap();
 
         // Debug bitmap prints
         color_bitboards[Color::White as usize].print(Some("White Bitboard"), None);
@@ -201,6 +212,11 @@ impl Game {
         for piece in Piece::iter() {
             piece_bitboards[piece as usize]
                 .print(Some(format!("{:?} Piece Bitboard", piece).as_str()), None);
+        }
+
+        let mut halfmoves = fullmoves * 2;
+        if turn == Color::Black {
+            halfmoves += 1;
         }
 
         // for color in Color::iter() {
@@ -230,8 +246,9 @@ impl Game {
             castling_flags,
             en_passant_bitmap,
             piece_bitboards,
-            halfmove_clock,
-            fullmove_number,
+            halfmoves_since_capture,
+            halfmoves,
+            history: vec![],
         }
     }
 
@@ -255,14 +272,49 @@ impl Game {
         self.pieces[square.y as usize][square.x as usize] = Some((piece, color));
     }
 
-    pub fn unmake_move(&mut self, board_move: BoardMove) {
-        unimplemented!()
+    pub fn unmake_move(&mut self) {
+        let (board_move, captured_piece, castling_flags_copy) = self.history.pop().unwrap();
+
+        // move the piece back
+        let (piece, color) =
+            self.pieces[board_move.to.y as usize][board_move.to.x as usize].unwrap();
+
+        self.unset_piece(&board_move.to);
+        self.set_piece(&board_move.from, piece, color);
+
+        // place the captured piece back
+        if let Some((c_piece, c_color)) = captured_piece {
+            self.set_piece(&board_move.to, c_piece, c_color);
+        }
+
+        // restore bitmaps
+        self.castling_flags = castling_flags_copy;
+
+        // if pawn moves in a cross manner and doesn't capture piece, en-passant happened
+        if piece == Piece::Pawn && captured_piece.is_none() && board_move.to.x != board_move.from.x
+        {
+            let captured_pawn_square = BoardSquare {
+                x: board_move.to.x,
+                y: board_move.from.y,
+            };
+
+            self.set_piece(&captured_pawn_square, Piece::Pawn, !color);
+            self.en_passant_bitmap = board_move.to.to_mask();
+        }
+
+        self.turn = !self.turn;
+        self.halfmoves -= 1;
+
+        // TODO: castling -- if king moved 2 pieces, flipped
+        // TODO: half-moves since last capture
     }
 
     pub fn make_move(&mut self, board_move: BoardMove) {
         let (mut piece, color) = self.pieces[board_move.from.y as usize]
             [board_move.from.x as usize]
             .expect("No piece at source square");
+
+        let captured_piece = self.pieces[board_move.to.y as usize][board_move.to.x as usize];
 
         self.unset_piece(&board_move.from);
 
@@ -283,6 +335,8 @@ impl Game {
             })
         }
 
+        let castling_flags_copy = self.castling_flags;
+
         // set en-passant bit if pawn en-passanted
         if piece == Piece::Pawn
             && (board_move.from.y == 1 || board_move.from.y == 6)
@@ -294,7 +348,15 @@ impl Game {
             self.en_passant_bitmap = 0;
         }
 
-        // TODO castling_flags: u8, // 0x0000QKqk, where kq/KQ is one if black/white king and queen
+        self.history
+            .push((board_move, captured_piece, castling_flags_copy));
+
+        self.turn = !self.turn;
+        self.halfmoves += 1;
+
+        // TODO update castling flags
+        // TODO: castling
+        // TODO: half-moves since last capture
     }
 
     pub fn get_occlusion(&self, index: usize, piece: Piece) -> Bitboard {
@@ -319,6 +381,8 @@ impl Game {
     /// assuming the current game state.
     /// TODO: pins
     /// TODO: castling
+    /// TODO: don't move into check
+    /// TODO: prevent check
     ///
     pub fn get_valid_move_bitboard(&self, square: &BoardSquare) -> Bitboard {
         let (piece, color) = match self.pieces[square.y as usize][square.x as usize] {
@@ -363,12 +427,19 @@ impl Game {
 
                 valid_moves &= opacity_bitmap;
             }
+            // King stuff -- don't move into square under attack
+            Piece::King => {
+                // TODO: check occlusions of enemy attackers and creae a bitmap with it
+                //   - it's only necessary to look at rooks/bishops, others aren't sliding (pawns, kings, knights)
+                //   - once we have this, we can just end valid mowes and we're good
+            }
             _ => {}
         }
 
         valid_moves
     }
 
+    // TODO: nuke this entire function, it's dumb
     pub fn try_make_move(&mut self, board_move: BoardMove) -> MoveResultType {
         let from_bitmask = board_move.from.to_mask();
         let to_bitmask = board_move.to.to_mask();
@@ -389,12 +460,6 @@ impl Game {
                 }
 
                 self.make_move(board_move);
-                self.turn = !self.turn;
-
-                if self.turn == Color::White {
-                    self.halfmove_clock += 1;
-                }
-
                 MoveResultType::Success
             }
             None => MoveResultType::WrongSource,

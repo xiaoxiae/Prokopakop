@@ -9,6 +9,7 @@ pub(crate) enum GUICommand {
     // Regular chess bot
     Play,
     Move(String), // perform a move
+    Unmove,
 
     // Shared
     Position(Option<String>), // `position` for both
@@ -51,6 +52,7 @@ pub(crate) fn receive() -> Option<GUICommand> {
         ["quit"] => Some(GUICommand::Quit),
         ["magic"] => Some(GUICommand::Magic),
         ["move", notation] => Some(GUICommand::Move(notation.to_string())),
+        ["unmove"] => Some(GUICommand::Unmove),
         _ => None,
     }
 }

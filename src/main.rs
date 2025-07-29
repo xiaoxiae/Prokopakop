@@ -19,10 +19,16 @@ fn main() {
         // Common commands
         match (&input, controller.mode.is_some()) {
             (Some(GUICommand::Quit), _) => break,
-            (Some(GUICommand::Position(fen)), true) => match fen {
-                None => controller.new_game(None),
-                Some(fen) => controller.new_game(Some(fen.as_str())),
-            },
+            (Some(GUICommand::Position(fen)), true) => {
+                match fen {
+                    None => controller.new_game(None),
+                    Some(fen) => controller.new_game(Some(fen.as_str())),
+                }
+
+                if let Some(ControllerMode::Play) = controller.mode {
+                    controller.print(None);
+                }
+            }
             (Some(GUICommand::Magic), _) => {
                 let mut magic_bitboards: MagicBitboards = Default::default();
 
@@ -76,7 +82,7 @@ fn main() {
 
         match controller.mode {
             // UCI-only commands
-            Some(Mode::UCI) => match input {
+            Some(ControllerMode::UCI) => match input {
                 Some(GUICommand::IsReady) => respond(BotCommand::ReadyOk),
                 Some(GUICommand::ValidMoves(depth_string)) => {
                     let moves = controller.get_valid_moves(depth_string.parse::<usize>().unwrap());
@@ -90,9 +96,17 @@ fn main() {
                 _ => {}
             },
             // Player-only commands
-            Some(Mode::Player) => match input {
+            Some(ControllerMode::Play) => match input {
                 Some(GUICommand::Move(notation)) => {
                     let result = controller.try_move_piece(notation);
+
+                    match result {
+                        MoveResultType::Success => controller.print(None),
+                        _ => log::info!("{:?}", result),
+                    };
+                }
+                Some(GUICommand::Unmove) => {
+                    let result = controller.try_unmove_piece();
 
                     match result {
                         MoveResultType::Success => controller.print(None),
@@ -126,12 +140,12 @@ fn main() {
                     respond(BotCommand::Identify(name.to_string(), author.to_string()));
                     respond(BotCommand::UCIOk);
 
-                    controller.initialize(Mode::UCI)
+                    controller.initialize(ControllerMode::UCI)
                 }
                 Some(GUICommand::Play) => {
                     respond(BotCommand::PlayOk);
 
-                    controller.initialize(Mode::Player);
+                    controller.initialize(ControllerMode::Play);
                     controller.print(None)
                 }
                 _ => {}

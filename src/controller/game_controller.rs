@@ -1,14 +1,14 @@
 use crate::BitboardExt;
 use crate::game::{BoardMove, BoardSquare, Color, Game, MoveResultType, Piece};
 
-pub enum Mode {
+pub enum ControllerMode {
     UCI,
-    Player,
+    Play,
 }
 
 pub struct GameController {
     pub game: Game,
-    pub mode: Option<Mode>,
+    pub mode: Option<ControllerMode>,
 }
 
 impl GameController {
@@ -24,7 +24,7 @@ impl GameController {
         self.game = Game::new(fen);
     }
 
-    pub fn initialize(&mut self, mode: Mode) {
+    pub fn initialize(&mut self, mode: ControllerMode) {
         self.mode = Some(mode);
         self.new_game(None);
     }
@@ -40,7 +40,10 @@ impl GameController {
         // Convert possible moves to a HashSet for O(1) lookup
         let move_squares: std::collections::HashSet<(usize, usize)> = possible_moves
             .map(|moves| {
-                moves.iter().map(|square| (square.x as usize, square.y as usize)).collect()
+                moves
+                    .iter()
+                    .map(|square| (square.x as usize, square.y as usize))
+                    .collect()
             })
             .unwrap_or_default();
 
@@ -75,7 +78,7 @@ impl GameController {
 
                 line.push_str(RESET);
             }
-            log::info!("{}", line);
+            println!("{}", line);
         }
     }
 
@@ -86,12 +89,21 @@ impl GameController {
         }
     }
 
+    pub fn try_unmove_piece(&mut self) -> MoveResultType {
+        match self.game.history.len() {
+            0 => MoveResultType::NoHistory,
+            _ => {
+                self.game.unmake_move();
+                MoveResultType::Success
+            }
+        }
+    }
+
     pub fn get_valid_moves(&self, depth: usize) -> Vec<(BoardMove, usize)> {
         let mut moves = vec![];
 
         for x in 0..8 {
             for y in 0..8 {
-
                 let valid_bitmap = self.game.get_valid_move_bitboard(&BoardSquare { x, y });
 
                 for x2 in 0..8 {
@@ -100,16 +112,14 @@ impl GameController {
 
                         // TODO: correctly count pawn promotions
                         if valid_bitmap & to.to_mask() != 0 {
-                            moves.push(
-                                (
-                                    BoardMove {
-                                        from: BoardSquare { x, y },
-                                        to,
-                                        promotion: None
-                                    },
-                                    1
-                                )
-                            )
+                            moves.push((
+                                BoardMove {
+                                    from: BoardSquare { x, y },
+                                    to,
+                                    promotion: None,
+                                },
+                                1,
+                            ))
                         }
                     }
                 }
