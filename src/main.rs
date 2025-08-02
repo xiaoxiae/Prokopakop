@@ -119,7 +119,7 @@ fn main() {
                     // If parsing as move works, it has to be depth
                     match BoardSquare::parse(square_or_depth_string.as_str()) {
                         Some(square) => {
-                            let moves = controller.get_valid_moves(1);
+                            let moves = controller.get_valid_moves(0);
 
                             controller.print(Some(
                                 moves

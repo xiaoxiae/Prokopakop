@@ -1,7 +1,7 @@
 use std::ops::Not;
 use strum_macros::{EnumCount, EnumIter, FromRepr};
 
-#[derive(Copy, Clone, Debug, PartialEq, EnumIter, EnumCount, FromRepr)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, EnumIter, EnumCount, FromRepr)]
 pub enum Piece {
     // Promoting pieces
     Knight = 0,
@@ -14,7 +14,7 @@ pub enum Piece {
     King = 5,
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, EnumIter, EnumCount, FromRepr)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, EnumIter, EnumCount, FromRepr)]
 pub enum Color {
     Black = 0,
     White = 1,
@@ -68,4 +68,5 @@ impl Piece {
     }
 }
 
+// TODO: this should be a named tuple
 pub type ColoredPiece = (Piece, Color);

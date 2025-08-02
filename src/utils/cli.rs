@@ -44,7 +44,7 @@ pub(crate) fn receive() -> Option<GUICommand> {
         ["ucinewgame"] => Some(GUICommand::Position(None)),
         ["position", "startpos"] => Some(GUICommand::Position(None)),
         ["position", "startpos", ..] => unimplemented!(),
-        ["position", "fen", fen @ ..] => Some(GUICommand::Position(Some(fen.join(" ")))),
+        ["position", "fen", fen @ ..] if !fen.is_empty() => Some(GUICommand::Position(Some(fen.join(" ")))),
         ["setoption", ..] => unimplemented!(),
         ["moves"] => Some(ValidMoves("1".to_string())),
         ["go", "perft", depth] | ["moves", depth] => Some(ValidMoves(depth.to_string())),
@@ -52,7 +52,7 @@ pub(crate) fn receive() -> Option<GUICommand> {
         ["quit"] => Some(GUICommand::Quit),
         ["magic"] => Some(GUICommand::Magic),
         ["move", notation] => Some(GUICommand::Move(notation.to_string())),
-        ["unmove"] => Some(GUICommand::Unmove),
+        ["unmove"] | ["undo"]  => Some(GUICommand::Unmove),
         _ => None,
     }
 }

@@ -30,11 +30,11 @@ impl GameController {
 
     pub fn print(&self, possible_moves: Option<Vec<&BoardSquare>>) {
         const RESET: &str = "\x1b[0m";
-        const LIGHT_SQUARE_BG: &str = "\x1b[48;5;214m"; // Orange background
-        const DARK_SQUARE_BG: &str = "\x1b[48;5;130m"; // Brown background
-        const WHITE_PIECE: &str = "\x1b[1;97m"; // Bright white for white pieces
-        const BLACK_PIECE: &str = "\x1b[1;30m"; // Black for black pieces
-        const MOVE_HIGHLIGHT: &str = "\x1b[1;34m"; // Blue color for move highlights
+        const LIGHT_SQUARE_BG: &str = "\x1b[48;5;172m";
+        const DARK_SQUARE_BG: &str = "\x1b[48;5;130m";
+        const WHITE_PIECE: &str = "\x1b[1;97m";
+        const BLACK_PIECE: &str = "\x1b[1;30m";
+        const MOVE_HIGHLIGHT: &str = "\x1b[1;34m";
 
         // Convert possible moves to a HashSet for O(1) lookup
         let move_squares: std::collections::HashSet<(usize, usize)> = possible_moves
@@ -84,22 +84,14 @@ impl GameController {
     pub fn try_move_piece(&mut self, long_algebraic_notation: String) -> MoveResultType {
         match BoardMove::parse(long_algebraic_notation.as_str()) {
             Some(board_move) => {
-                if self.game.color_bitboards[self.game.side as usize] & board_move.from.to_mask()
-                    == 0
-                {
-                    return MoveResultType::WrongSource;
+                let valid_moves = self.game.get_current_position_moves();
+
+                if valid_moves.contains(&board_move) {
+                    self.game.make_move(board_move);
+                    MoveResultType::Success
+                } else {
+                    MoveResultType::InvalidMove
                 }
-
-                // Baseline valid moves bitmap
-                let valid_moves = self.game.get_square_valid_move_bitboard(&board_move.from);
-
-                // Not a valid destination square
-                if valid_moves & board_move.to.to_mask() == 0 {
-                    return MoveResultType::WrongDestination;
-                }
-
-                self.game.make_move(board_move);
-                MoveResultType::Success
             }
             None => MoveResultType::InvalidNotation,
         }
@@ -119,7 +111,7 @@ impl GameController {
         let mut all_moves = vec![];
 
         // Get all valid moves for the current position
-        let current_moves = self.get_current_position_moves();
+        let current_moves = self.game.get_current_position_moves();
 
         for board_move in current_moves {
             let move_count = self.dfs_count_moves(board_move.clone(), depth);
@@ -127,21 +119,6 @@ impl GameController {
         }
 
         all_moves
-    }
-
-    fn get_current_position_moves(&self) -> Vec<BoardMove> {
-        let mut moves = vec![];
-
-        for x in 0..8 {
-            for y in 0..8 {
-                moves.extend(
-                    self.game
-                        .get_square_valid_moves(&BoardSquare { x, y })
-                );
-            }
-        }
-
-        moves
     }
 
     fn dfs_count_moves(&mut self, initial_move: BoardMove, depth: usize) -> usize {
@@ -153,7 +130,7 @@ impl GameController {
 
         let mut total_count = 0;
 
-        let current_moves = self.get_current_position_moves();
+        let current_moves = self.game.get_current_position_moves();
 
         if depth == 1 {
             total_count = current_moves.len();

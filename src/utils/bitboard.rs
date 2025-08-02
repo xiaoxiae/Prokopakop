@@ -1,4 +1,4 @@
-use crate::game::{Color, Piece};
+use crate::game::{BoardSquare, Color, Piece};
 use rand::RngCore;
 use std::fs::File;
 use std::io::{Result, Write};
@@ -11,6 +11,29 @@ pub trait BitboardExt {
     fn position_to_bitmask(x: u32, y: u32) -> Self;
     fn is_set(&self, x: u32, y: u32) -> bool;
     fn print(&self, title: Option<&str>, position: Option<(u32, u32)>);
+    fn iter_set_positions(&self) -> BitboardIterator;
+}
+
+pub struct BitboardIterator {
+    remaining: u64,
+}
+
+impl Iterator for BitboardIterator {
+    type Item = BoardSquare;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.remaining == 0 {
+            return None;
+        }
+
+        let square_index = self.remaining.trailing_zeros();
+        self.remaining &= self.remaining - 1; // Clear the lowest set bit
+
+        let x = square_index % 8;
+        let y = square_index / 8;
+
+        Some(BoardSquare { x, y })
+    }
 }
 
 // used like this because we can't have a const fn as a trait,
@@ -64,6 +87,10 @@ impl BitboardExt for u64 {
             log::debug!("");
         }
     }
+
+    fn iter_set_positions(&self) -> BitboardIterator {
+        BitboardIterator { remaining: *self }
+    }
 }
 
 type PieceBitboards = [Bitboard; 64];
@@ -74,7 +101,7 @@ const fn create_bitboard_for_piece(
     x: usize,
     y: usize,
     deltas: &[[i8; 2]],
-    infinite: bool,
+    slider: bool,
     exclude_last: bool,
     blockers: Bitboard,
 ) -> Bitboard {
@@ -106,7 +133,7 @@ const fn create_bitboard_for_piece(
 
             bitboard |= position_to_bitmask(nx as u32, ny as u32);
 
-            if !infinite {
+            if !slider {
                 break;
             }
         }
@@ -117,11 +144,11 @@ const fn create_bitboard_for_piece(
     bitboard
 }
 
-const fn get_piece_deltas(piece: &Piece, color_value: usize) -> &'static [[i8; 2]] {
+const fn get_attack_piece_deltas(piece: &Piece, color_value: usize) -> &'static [[i8; 2]] {
     match piece {
         Piece::Pawn => match color_value {
-            0 => &[[0, -1]],
-            1 => &[[0, 1]],
+            0 => &[[-1, -1], [1, -1]],
+            1 => &[[-1, 1], [1, 1]],
             _ => unreachable!(),
         },
         Piece::Knight => &[
@@ -159,7 +186,7 @@ const fn get_piece_deltas(piece: &Piece, color_value: usize) -> &'static [[i8; 2
     }
 }
 
-const fn get_is_infinite(piece: &Piece) -> bool {
+const fn get_is_slider(piece: &Piece) -> bool {
     match piece {
         Piece::Pawn => false,
         Piece::Knight => false,
@@ -170,7 +197,7 @@ const fn get_is_infinite(piece: &Piece) -> bool {
     }
 }
 
-const fn calculate_bitboard_for_pieces() -> ValidMoveBitboards {
+const fn calculate_attack_bitboards_for_pieces() -> ValidMoveBitboards {
     let mut bitboards = [[[0; 64]; Piece::COUNT]; Color::COUNT];
 
     let mut color = 0;
@@ -185,11 +212,11 @@ const fn calculate_bitboard_for_pieces() -> ValidMoveBitboards {
                 while y < 8 {
                     match Piece::from_repr(piece) {
                         Some(piece_type) => {
-                            let deltas = get_piece_deltas(&piece_type, color);
-                            let infinite = get_is_infinite(&piece_type);
+                            let deltas = get_attack_piece_deltas(&piece_type, color);
+                            let slider = get_is_slider(&piece_type);
 
                             bitboards[color][piece][x + y * 8] |=
-                                create_bitboard_for_piece(x, y, deltas, infinite, false, 0);
+                                create_bitboard_for_piece(x, y, deltas, slider, false, 0);
                         }
                         None => unreachable!(),
                     }
@@ -240,48 +267,12 @@ const fn calculate_pawn_attack_moves() -> PawnBitboards {
     bitboards
 }
 
-const fn calculate_pawn_first_moves() -> PawnBitboards {
-    let mut bitboards = [[0; 64]; Color::COUNT];
+pub const ATTACK_BITBOARDS: ValidMoveBitboards = calculate_attack_bitboards_for_pieces();
 
-    let mut color = 0;
-    while color < Color::COUNT {
-        let mut x = 0;
-
-        while x < 8 {
-            let mut y = 0;
-
-            while y < 8 {
-                let deltas = match color {
-                    0 => [[0, -2]],
-                    1 => [[0, 2]],
-                    _ => unreachable!(),
-                };
-
-                bitboards[color][x + y * 8] |=
-                    create_bitboard_for_piece(x, y, &deltas, false, false, 0);
-
-                y += 1;
-            }
-
-            x += 1;
-        }
-        color += 1;
-    }
-
-    bitboards
-}
-
-pub const VALID_MOVE_BITBOARDS: ValidMoveBitboards = calculate_bitboard_for_pieces();
-
-pub const PAWN_ATTACK_MOVE_BITBOARD: PawnBitboards = calculate_pawn_attack_moves();
-pub const PAWN_FIRST_MOVE_BITBOARD: PawnBitboards = calculate_pawn_first_moves();
-
-pub const ROOK_BLOCKER_BITBOARD: PieceBitboards =
-    calculate_blocker_bitboards(get_piece_deltas(&Piece::Rook, 0));
+pub const MAGIC_ROOK_BLOCKER_BITBOARD: PieceBitboards =
+    calculate_blocker_bitboards(get_attack_piece_deltas(&Piece::Rook, 0));
 pub const BISHOP_BLOCKER_BITBOARD: PieceBitboards =
-    calculate_blocker_bitboards(get_piece_deltas(&Piece::Bishop, 0));
-
-pub const CASTLING_BITBOARDS: [Bitboard; 4] = [0b00000000, 0b00100000, 0b00000010, 0b00100010];
+    calculate_blocker_bitboards(get_attack_piece_deltas(&Piece::Bishop, 0));
 
 pub struct MagicBitboardEntry {
     pub magic: u64,
@@ -313,7 +304,7 @@ const fn calculate_blocker_bitboards(deltas: &[[i8; 2]]) -> PieceBitboards {
 pub fn calculate_magic_bitboard(x: usize, y: usize, piece: &Piece) -> MagicBitboardEntry {
     let possible_blockers_bitboard = match piece {
         Piece::Bishop => BISHOP_BLOCKER_BITBOARD[x + y * 8],
-        Piece::Rook => ROOK_BLOCKER_BITBOARD[x + y * 8],
+        Piece::Rook => MAGIC_ROOK_BLOCKER_BITBOARD[x + y * 8],
         _ => unreachable!(),
     };
 
@@ -338,7 +329,7 @@ pub fn calculate_magic_bitboard(x: usize, y: usize, piece: &Piece) -> MagicBitbo
         }
 
         // for that particular blocker arrangement, calculate the valid moves
-        let deltas = get_piece_deltas(&piece, 0); // color doesn't matter
+        let deltas = get_attack_piece_deltas(&piece, 0); // color doesn't matter
         let valid_moves = create_bitboard_for_piece(x, y, deltas, true, false, bitboard);
 
         keys.push((bitboard, valid_moves));

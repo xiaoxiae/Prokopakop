@@ -27,7 +27,7 @@ fn test_perft_positions() {
     let mut failures: Vec<_> = Vec::new();
     let mut total = 0;
     
-    let max_perft = 2;
+    let max_perft = 3;
 
     // Yoinked from https://www.chessprogramming.org/Perft_Results
     let test_positions = [
