@@ -7,9 +7,11 @@ pub(crate) enum GUICommand {
     IsReady,
 
     // Regular chess bot
-    Play,
+    Play,         // start play
+    Status,       // status of the board
     Move(String), // perform a move
-    Unmove,
+    Unmove,       // undo a move
+    Fen,          // produce a fen string for the current position
 
     // Shared
     Position(Option<String>), // `position` for both
@@ -44,7 +46,9 @@ pub(crate) fn receive() -> Option<GUICommand> {
         ["ucinewgame"] => Some(GUICommand::Position(None)),
         ["position", "startpos"] => Some(GUICommand::Position(None)),
         ["position", "startpos", ..] => unimplemented!(),
-        ["position", "fen", fen @ ..] if !fen.is_empty() => Some(GUICommand::Position(Some(fen.join(" ")))),
+        ["position", "fen", fen @ ..] if !fen.is_empty() => {
+            Some(GUICommand::Position(Some(fen.join(" "))))
+        }
         ["setoption", ..] => unimplemented!(),
         ["moves"] => Some(ValidMoves("1".to_string())),
         ["go", "perft", depth] | ["moves", depth] => Some(ValidMoves(depth.to_string())),
@@ -52,7 +56,9 @@ pub(crate) fn receive() -> Option<GUICommand> {
         ["quit"] => Some(GUICommand::Quit),
         ["magic"] => Some(GUICommand::Magic),
         ["move", notation] => Some(GUICommand::Move(notation.to_string())),
-        ["unmove"] | ["undo"]  => Some(GUICommand::Unmove),
+        ["unmove"] => Some(GUICommand::Unmove),
+        ["status"] => Some(GUICommand::Status),
+        ["fen"] => Some(GUICommand::Fen),
         _ => None,
     }
 }
