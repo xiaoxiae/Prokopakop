@@ -2,7 +2,7 @@ use super::pieces::{Color, Piece};
 use crate::game::ColoredPiece;
 use crate::utils::Bitboard;
 use crate::{
-    ATTACK_BITBOARDS, BitboardExt, BoardSquare, BoardSquareExt, MAGIC_BISHOP_BLOCKER_BITBOARD,
+    BitboardExt, BoardSquare, BoardSquareExt, ATTACK_BITBOARDS, MAGIC_BISHOP_BLOCKER_BITBOARD,
     MAGIC_ENTRIES, MAGIC_ROOK_BLOCKER_BITBOARD, MAGIC_TABLE,
 };
 use std::cmp::PartialEq;
@@ -16,6 +16,14 @@ pub struct BoardMove {
 }
 
 impl BoardMove {
+    pub fn default() -> BoardMove {
+        BoardMove {
+            from: 0,
+            to: 0,
+            promotion: None,
+        }
+    }
+
     pub fn parse(string: &str) -> Option<BoardMove> {
         let from = string.get(0..2);
         let to = string.get(2..4);
@@ -107,6 +115,8 @@ impl Iterator for ValidMovesIterator {
 }
 
 pub type PieceBoard = [Option<ColoredPiece>; 64];
+
+const MAX_VALID_MOVES: usize = 256;
 
 #[derive(Debug)]
 pub enum MoveResultType {
@@ -722,10 +732,10 @@ impl Game {
     ///
     /// Obtain a list of valid moves for the current position.
     ///
-    pub fn get_current_position_moves(&mut self) -> Vec<BoardMove> {
+    pub fn get_current_position_moves(&mut self) -> ([BoardMove; MAX_VALID_MOVES], usize) {
         let position_iterator = self.color_bitboards[self.side as usize].iter_set_positions();
-        let mut resulting_positions = Vec::with_capacity(256);
-        let mut i = 0;
+        let mut resulting_positions = [BoardMove::default(); MAX_VALID_MOVES];
+        let mut count = 0;
 
         for bitboard in position_iterator {
             for board_move in self.get_square_pseudo_legal_moves(bitboard) {
@@ -737,14 +747,14 @@ impl Game {
                         & self.color_bitboards[!self.side as usize]))
                     == 0
                 {
-                    resulting_positions.push(board_move);
-                    i += 1;
+                    resulting_positions[count] = board_move;
+                    count += 1;
                 }
 
                 self.unmake_move();
             }
         }
 
-        resulting_positions
+        (resulting_positions, count)
     }
 }

@@ -1,5 +1,5 @@
-use crate::{BoardSquare, BoardSquareExt};
 use crate::game::{BoardMove, Color, Game, MoveResultType};
+use crate::{BoardSquare, BoardSquareExt};
 
 pub enum ControllerMode {
     UCI,
@@ -116,7 +116,7 @@ impl GameController {
     pub fn try_move_piece(&mut self, long_algebraic_notation: String) -> MoveResultType {
         match BoardMove::parse(long_algebraic_notation.as_str()) {
             Some(board_move) => {
-                let valid_moves = self.game.get_current_position_moves();
+                let (valid_moves, _) = self.game.get_current_position_moves();
 
                 if valid_moves.contains(&board_move) {
                     self.game.make_move(board_move);
@@ -143,9 +143,9 @@ impl GameController {
         let mut all_moves = vec![];
 
         // Get all valid moves for the current position
-        let current_moves = self.game.get_current_position_moves();
+        let (current_moves, count) = self.game.get_current_position_moves();
 
-        for board_move in current_moves {
+        for board_move in current_moves.into_iter().take(count) {
             let move_count = self.dfs_count_moves(board_move.clone(), depth);
             all_moves.push((board_move, move_count));
         }
@@ -162,13 +162,13 @@ impl GameController {
 
         let mut total_count = 0;
 
-        let current_moves = self.game.get_current_position_moves();
+        let (current_moves, count) = self.game.get_current_position_moves();
 
         // Bulk counting
         if depth == 1 {
-            total_count = current_moves.len();
+            total_count = count;
         } else {
-            for board_move in current_moves {
+            for board_move in current_moves.into_iter().take(count) {
                 total_count += self.dfs_count_moves(board_move, depth - 1);
             }
         }
