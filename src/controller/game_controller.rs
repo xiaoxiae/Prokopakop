@@ -1,4 +1,5 @@
-use crate::game::{BoardMove, BoardSquare, Color, Game, MoveResultType};
+use crate::{BoardSquare, BoardSquareExt};
+use crate::game::{BoardMove, Color, Game, MoveResultType};
 
 pub enum ControllerMode {
     UCI,
@@ -28,7 +29,7 @@ impl GameController {
         self.new_game(None);
     }
 
-    pub fn print_with_possible_moves(&self, possible_moves: Vec<&BoardSquare>) {
+    pub fn print_with_moves(&self, possible_moves: Vec<&BoardSquare>) {
         const RESET: &str = "\x1b[0m";
         const LIGHT_SQUARE_BG: &str = "\x1b[48;5;172m";
         const DARK_SQUARE_BG: &str = "\x1b[48;5;130m";
@@ -66,7 +67,7 @@ impl GameController {
         // Convert possible moves to a HashSet for O(1) lookup
         let move_squares: std::collections::HashSet<(usize, usize)> = possible_moves
             .iter()
-            .map(|square| (square.x as usize, square.y as usize))
+            .map(|square| (square.get_x() as usize, square.get_y() as usize))
             .collect();
 
         for y in (0..8).rev() {
@@ -105,7 +106,7 @@ impl GameController {
     }
 
     pub fn print(&self) {
-        self.print_with_possible_moves(vec![]);
+        self.print_with_moves(vec![]);
     }
 
     pub fn print_fen(&self) {
@@ -163,10 +164,10 @@ impl GameController {
 
         let current_moves = self.game.get_current_position_moves();
 
+        // Bulk counting
         if depth == 1 {
             total_count = current_moves.len();
         } else {
-            // Recursive case: explore each move further
             for board_move in current_moves {
                 total_count += self.dfs_count_moves(board_move, depth - 1);
             }

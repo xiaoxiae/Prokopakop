@@ -4,7 +4,7 @@ use std::time::Instant;
 #[test]
 fn test_position() {
     let mut controller = GameController::new();
-    
+
     for position in [
         "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
         "8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1",
@@ -23,33 +23,51 @@ fn test_position() {
         let generated_parts: Vec<&str> = generated_fen.split_whitespace().collect();
 
         // Compare piece placement
-        assert_eq!(original_parts[0], generated_parts[0],
-                   "Piece placement mismatch for position: {}", position);
+        assert_eq!(
+            original_parts[0], generated_parts[0],
+            "Piece placement mismatch for position: {}",
+            position
+        );
 
         // Compare active color
-        assert_eq!(original_parts[1], generated_parts[1],
-                   "Active color mismatch for position: {}", position);
+        assert_eq!(
+            original_parts[1], generated_parts[1],
+            "Active color mismatch for position: {}",
+            position
+        );
 
         // Compare castling rights
-        assert_eq!(original_parts[2], generated_parts[2],
-                   "Castling rights mismatch for position: {}", position);
+        assert_eq!(
+            original_parts[2], generated_parts[2],
+            "Castling rights mismatch for position: {}",
+            position
+        );
 
         // Compare en passant (if provided in original)
         if original_parts.len() > 3 {
-            assert_eq!(original_parts[3], generated_parts[3],
-                       "En passant mismatch for position: {}", position);
+            assert_eq!(
+                original_parts[3], generated_parts[3],
+                "En passant mismatch for position: {}",
+                position
+            );
         }
 
         // Compare halfmove clock (if provided in original)
         if original_parts.len() > 4 {
-            assert_eq!(original_parts[4], generated_parts[4],
-                       "Halfmove clock mismatch for position: {}", position);
+            assert_eq!(
+                original_parts[4], generated_parts[4],
+                "Halfmove clock mismatch for position: {}",
+                position
+            );
         }
 
         // Compare fullmove number (if provided in original)
         if original_parts.len() > 5 {
-            assert_eq!(original_parts[5], generated_parts[5],
-                       "Fullmove number mismatch for position: {}", position);
+            assert_eq!(
+                original_parts[5], generated_parts[5],
+                "Fullmove number mismatch for position: {}",
+                position
+            );
         }
     }
 
@@ -61,12 +79,19 @@ fn test_position() {
 }
 
 #[test]
-fn test_perft_positions() {
+fn test_perft_positions_easy() {
+    test_perft_positions_depth(0, 3);
+}
+
+#[test]
+fn test_perft_positions_hard() {
+    test_perft_positions_depth(4, 5);
+}
+
+fn test_perft_positions_depth(min_depth: usize, max_depth: usize) {
     let mut controller = GameController::new();
     let mut failures: Vec<_> = Vec::new();
     let mut total = 0;
-    
-    let max_perft = 5;
 
     // Yoinked from https://www.chessprogramming.org/Perft_Results
     let test_positions = [
@@ -109,7 +134,7 @@ fn test_perft_positions() {
         controller.new_game(Some(position_fen));
 
         for &(depth, expected_count) in depth_counts {
-            if depth > max_perft {
+            if !(min_depth <= depth && depth <= max_depth) {
                 continue;
             }
 

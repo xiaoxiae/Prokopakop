@@ -1,12 +1,13 @@
 use std::ops::Not;
 use strum_macros::{EnumCount, EnumIter, FromRepr};
 
+// Do NOT fuck with these numbers since they are used for bit hacking
 #[derive(Copy, Clone, Debug, Eq, PartialEq, EnumIter, EnumCount, FromRepr)]
 pub enum Piece {
     // Promoting pieces
-    Knight = 0,
+    Rook = 0,
     Bishop = 1,
-    Rook = 2,
+    Knight = 2,
     Queen = 3,
 
     // Non-promoting pieces
