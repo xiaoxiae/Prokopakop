@@ -1,4 +1,5 @@
 use crate::game::{Color, Piece};
+use rayon::prelude::*;
 use rand::RngCore;
 use std::fs::File;
 use std::io::{Result, Write};
@@ -387,6 +388,7 @@ pub struct MagicBitboardEntry {
     pub magic: u64,
     pub shift: u8,
     pub entries: Vec<Bitboard>,
+    pub max_index: usize,
 }
 
 pub type MagicBitboards = Vec<MagicBitboardEntry>;
@@ -410,7 +412,12 @@ const fn calculate_blocker_bitboards(deltas: &[[i8; 2]]) -> PieceBitboards {
     bitboards
 }
 
-pub fn calculate_magic_bitboard(x: usize, y: usize, piece: &Piece) -> MagicBitboardEntry {
+pub fn calculate_magic_bitboard(
+    x: usize,
+    y: usize,
+    piece: &Piece,
+    target_max_index: Option<usize>
+) -> MagicBitboardEntry {
     let possible_blockers_bitboard = match piece {
         Piece::Bishop => MAGIC_BISHOP_BLOCKER_BITBOARD[x + y * 8],
         Piece::Rook => MAGIC_ROOK_BLOCKER_BITBOARD[x + y * 8],
@@ -446,7 +453,18 @@ pub fn calculate_magic_bitboard(x: usize, y: usize, piece: &Piece) -> MagicBitbo
 
     let mut rng = rand::rng();
     let magic_bitmap_size = blocker_count;
+    let max_attempts = if target_max_index.is_some() { 1_000_000 } else { 100_000 };
+    let mut attempts = 0;
+
     loop {
+        attempts += 1;
+
+        // Give up if we're trying to find a better one and can't
+        if attempts > max_attempts && target_max_index.is_some() {
+            // Return a result with the current target as max_index
+            return calculate_magic_bitboard(x, y, piece, None);
+        }
+
         // this is apparently the way to do it, since we need a relatively small number of bits
         // https://www.chessprogramming.org/Looking_for_Magics
         let magic: Bitboard = rng.next_u64() & rng.next_u64() & rng.next_u64();
@@ -457,9 +475,15 @@ pub fn calculate_magic_bitboard(x: usize, y: usize, piece: &Piece) -> MagicBitbo
 
         let mut hash_table = vec![None; 2usize.pow(magic_bitmap_size)];
         let mut collision = false;
+        let mut highest_index = 0;
 
         for (blockers, moves) in &keys {
             let hash = ((blockers.wrapping_mul(magic)) >> (64 - magic_bitmap_size)) as usize;
+
+            // Track the highest index we actually use
+            if hash > highest_index {
+                highest_index = hash;
+            }
 
             if let Some(existing_moves) = hash_table[hash] {
                 if existing_moves != *moves {
@@ -472,13 +496,23 @@ pub fn calculate_magic_bitboard(x: usize, y: usize, piece: &Piece) -> MagicBitbo
         }
 
         if !collision {
+            // If we have a target and this isn't better, keep trying
+            if let Some(target) = target_max_index {
+                if highest_index >= target {
+                    continue;
+                }
+            }
+
+            // Truncate the entries vector to only include up to the highest index
+            let entries: Vec<Bitboard> = (0..=highest_index)
+                .map(|i| hash_table[i].unwrap_or(0))
+                .collect();
+
             return MagicBitboardEntry {
                 magic,
                 shift: 64 - magic_bitmap_size as u8,
-                entries: hash_table
-                    .into_iter()
-                    .map(|moves| moves.unwrap_or(0))
-                    .collect(),
+                entries,
+                max_index: highest_index,
             };
         }
     }
@@ -536,4 +570,148 @@ pub fn serialize_magic_bitboards_to_file_flat<P: AsRef<Path>>(
     writeln!(file)?;
 
     Ok(())
+}
+
+pub fn generate_magic_bitboards() {
+    let mut magic_bitboards: MagicBitboards = Vec::with_capacity(128);
+
+    // Initialize with basic magic numbers
+    log::info!("Finding initial magic bitboards...");
+
+    // Rook magic numbers
+    for y in 0..8 {
+        for x in 0..8 {
+            let index = x + y * 8;
+            let result = calculate_magic_bitboard(x, y, &Piece::Rook, None);
+
+            log::debug!(
+                "Rook ({}/{}): {:064b}, shift={}, max_index={}",
+                index + 1,
+                64,
+                result.magic,
+                64 - result.shift,
+                result.max_index
+            );
+
+            magic_bitboards.push(result);
+        }
+    }
+
+    // Bishop magic numbers
+    for y in 0..8 {
+        for x in 0..8 {
+            let index = x + y * 8;
+            let result = calculate_magic_bitboard(x, y, &Piece::Bishop, None);
+
+            log::debug!(
+                "Bishop ({}/{}): {:064b}, shift={}, max_index={}",
+                index + 1,
+                64,
+                result.magic,
+                64 - result.shift,
+                result.max_index
+            );
+
+            magic_bitboards.push(result);
+        }
+    }
+
+    log::info!("Initial magic bitboards generated!");
+    serialize_magic_bitboards_to_file_flat(&magic_bitboards, concat!("src/utils/magic.rs"))
+        .expect("Failed to serialize initial magic bitboards");
+
+    // Now run indefinitely trying to find more compact magic numbers
+    log::info!("Searching for more compact magic bitboards...");
+
+    let thread_count = rayon::current_num_threads();
+    log::info!("Using {} threads for parallel search", thread_count);
+
+    let mut iteration = 0;
+    loop {
+        iteration += 1;
+        let mut improved = false;
+
+        // Process all 128 positions in parallel
+        let improvement_results: Vec<_> = (0..128)
+            .into_par_iter()
+            .map(|i| {
+                let (x, y, piece) = if i < 64 {
+                    let x = i % 8;
+                    let y = i / 8;
+                    (x, y, Piece::Rook)
+                } else {
+                    let idx = i - 64;
+                    let x = idx % 8;
+                    let y = idx / 8;
+                    (x, y, Piece::Bishop)
+                };
+
+                let current_max_index = magic_bitboards[i].max_index;
+
+                // Each thread tries to find a better magic number
+                let candidates: Vec<_> = (0..thread_count)
+                    .into_par_iter()
+                    .map(|_| calculate_magic_bitboard(x, y, &piece, Some(current_max_index)))
+                    .collect();
+
+                // Find the best candidate among all thread results
+                let best_candidate = candidates
+                    .into_iter()
+                    .min_by_key(|entry| entry.max_index)
+                    .unwrap();
+
+                (i, best_candidate, current_max_index)
+            })
+            .collect();
+
+        // Merge results - update magic_bitboards with any improvements
+        for (i, new_entry, old_max_index) in improvement_results {
+            if new_entry.max_index < old_max_index {
+                let (x, y, piece) = if i < 64 {
+                    let x = i % 8;
+                    let y = i / 8;
+                    (x, y, Piece::Rook)
+                } else {
+                    let idx = i - 64;
+                    let x = idx % 8;
+                    let y = idx / 8;
+                    (x, y, Piece::Bishop)
+                };
+
+                let piece_name = match piece {
+                    Piece::Rook => "Rook",
+                    Piece::Bishop => "Bishop",
+                    _ => unreachable!(),
+                };
+
+                log::info!(
+                    "Iteration {}: Improved {} at ({},{}): max_index {} -> {} (saved {} entries)",
+                    iteration,
+                    piece_name,
+                    x,
+                    y,
+                    old_max_index,
+                    new_entry.max_index,
+                    old_max_index - new_entry.max_index
+                );
+
+                magic_bitboards[i] = new_entry;
+                improved = true;
+            }
+        }
+
+        // Save if we found improvements
+        if improved {
+            serialize_magic_bitboards_to_file_flat(&magic_bitboards, concat!("src/utils/magic.rs"))
+                .expect("Failed to serialize improved magic bitboards");
+
+            let total_entries: usize = magic_bitboards.iter().map(|e| e.max_index + 1).sum();
+            log::info!("Total entries after iteration {}: {}", iteration, total_entries);
+        }
+
+        if iteration % 10 == 0 {
+            let total_entries: usize = magic_bitboards.iter().map(|e| e.max_index + 1).sum();
+            log::info!("Completed {} iterations. Total entries: {}", iteration, total_entries);
+        }
+    }
 }
