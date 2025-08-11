@@ -48,7 +48,7 @@ fn main() {
     // Handle FEN position
     if let Some(fen) = matches.get_one::<String>("fen") {
         controller.initialize(ControllerMode::Play);
-        controller.new_game(Some(fen.as_str()));
+        controller.new_game_from_fen(fen.as_str());
     }
 
     // Handle perft
@@ -57,10 +57,10 @@ fn main() {
             // Initialize if not already done
             if controller.mode.is_none() {
                 controller.initialize(ControllerMode::Play);
-                controller.new_game(None);
+                controller.new_game();
             }
 
-            let moves = controller.get_valid_moves(depth);
+            let moves = controller.perft(depth);
             let mut total = 0;
             for (m, c) in &moves {
                 println!("{}: {}", m.unparse(), c);
@@ -80,8 +80,8 @@ fn main() {
             (Some(GUICommand::Quit), _) => break,
             (Some(GUICommand::Position(fen)), true) => {
                 match fen {
-                    None => controller.new_game(None),
-                    Some(fen) => controller.new_game(Some(fen.as_str())),
+                    None => controller.new_game(),
+                    Some(fen) => controller.new_game_from_fen(fen.as_str()),
                 }
 
                 if let Some(ControllerMode::Play) = controller.mode {
@@ -96,7 +96,7 @@ fn main() {
             Some(ControllerMode::UCI) => match input {
                 Some(GUICommand::IsReady) => respond(BotCommand::ReadyOk),
                 Some(GUICommand::ValidMoves(depth_string)) => {
-                    let moves = controller.get_valid_moves(depth_string.parse::<usize>().unwrap());
+                    let moves = controller.perft(depth_string.parse::<usize>().unwrap());
 
                     let mut total = 0;
                     for (m, c) in &moves {
@@ -132,7 +132,7 @@ fn main() {
                     // If parsing as move works, it has to be depth
                     match BoardSquare::parse(square_or_depth_string.as_str()) {
                         Some(square) => {
-                            let moves = controller.get_valid_moves(0);
+                            let moves = controller.perft(0);
 
                             let moves_to = moves
                                 .iter()
@@ -144,7 +144,7 @@ fn main() {
                             controller.print_with_moves(moves_to);
                         }
                         None => {
-                            let moves = controller.get_valid_moves(
+                            let moves = controller.perft(
                                 square_or_depth_string.parse::<usize>().unwrap_or(1),
                             );
 

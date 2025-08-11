@@ -1,5 +1,6 @@
 use crate::game::{BoardMove, Color, Game, MoveResultType};
 use crate::{BoardSquare, BoardSquareExt};
+use fxhash::FxHashMap;
 
 pub enum ControllerMode {
     UCI,
@@ -11,22 +12,27 @@ pub struct GameController {
     pub mode: Option<ControllerMode>,
 }
 
+pub type PerftTable = FxHashMap<u64, usize>;
+
 impl GameController {
     pub fn new() -> Self {
         Self {
-            // TODO: a bit wasteful
             game: Game::new(None),
             mode: None,
         }
     }
 
-    pub fn new_game(&mut self, fen: Option<&str>) {
-        self.game = Game::new(fen);
+    pub fn new_game(&mut self) {
+        self.game = Game::new(None);
+    }
+
+    pub fn new_game_from_fen(&mut self, fen: &str) {
+        self.game = Game::new(Some(fen));
     }
 
     pub fn initialize(&mut self, mode: ControllerMode) {
         self.mode = Some(mode);
-        self.new_game(None);
+        self.new_game();
     }
 
     pub fn print_with_moves(&self, possible_moves: Vec<&BoardSquare>) {
@@ -139,26 +145,37 @@ impl GameController {
         }
     }
 
-    pub fn get_valid_moves(&mut self, depth: usize) -> Vec<(BoardMove, usize)> {
-        let mut all_moves = vec![];
+    pub fn perft(&mut self, depth: usize) -> Vec<(BoardMove, usize)> {
+        let mut table: PerftTable = FxHashMap::default();
+        let mut move_breakdown = vec![];
 
         // Get all valid moves for the current position
         let (current_moves, count) = self.game.get_current_position_moves();
 
         for board_move in current_moves.into_iter().take(count) {
-            let move_count = self.dfs_count_moves(board_move.clone(), depth);
-            all_moves.push((board_move, move_count));
+            let move_count = self.dfs_count_moves(board_move.clone(), depth, &mut table);
+            move_breakdown.push((board_move, move_count));
         }
 
-        all_moves
+        move_breakdown
     }
 
-    fn dfs_count_moves(&mut self, initial_move: BoardMove, depth: usize) -> usize {
+    fn dfs_count_moves(
+        &mut self,
+        initial_move: BoardMove,
+        depth: usize,
+        table: &mut PerftTable,
+    ) -> usize {
         if depth <= 1 {
             return 1;
         }
 
         self.game.make_move(initial_move);
+
+        if let Some(count) = table.get(&(self.game.zobrist_key ^ depth as u64)) {
+            self.game.unmake_move();
+            return *count;
+        }
 
         let mut total_count = 0;
 
@@ -169,9 +186,11 @@ impl GameController {
             total_count = count;
         } else {
             for board_move in current_moves.into_iter().take(count) {
-                total_count += self.dfs_count_moves(board_move, depth - 1);
+                total_count += self.dfs_count_moves(board_move, depth - 1, table);
             }
         }
+
+        table.insert((self.game.zobrist_key ^ depth as u64), total_count);
 
         self.game.unmake_move();
 

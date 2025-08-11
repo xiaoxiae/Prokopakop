@@ -1,13 +1,16 @@
 use super::pieces::{Color, Piece};
 use crate::game::ColoredPiece;
 use crate::utils::Bitboard;
+use crate::zobris::ZOBRIST;
 use crate::{
-    BitboardExt, BoardSquare, BoardSquareExt, ATTACK_BITBOARDS, MAGIC_BISHOP_BLOCKER_BITBOARD,
+    ATTACK_BITBOARDS, BitboardExt, BoardSquare, BoardSquareExt, MAGIC_BISHOP_BLOCKER_BITBOARD,
     MAGIC_ENTRIES, MAGIC_ROOK_BLOCKER_BITBOARD, MAGIC_TABLE,
 };
 use std::cmp::PartialEq;
-use strum::{EnumCount, IntoEnumIterator};
+use strum::EnumCount;
+use strum::IntoEnumIterator;
 
+// TODO: this should be more compact, we're using too many bits here
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct BoardMove {
     pub from: BoardSquare,
@@ -147,6 +150,9 @@ pub struct Game {
     // store the move, which piece was there, and en-passant + castling flags
     // the flags can NOT be calculated as an arbitrary position can have those
     pub history: Vec<(BoardMove, Option<ColoredPiece>, u8, Bitboard)>,
+
+    // store the zobrist key for the current position (computed iteratively)
+    pub zobrist_key: u64,
 }
 
 impl Game {
@@ -166,6 +172,7 @@ impl Game {
             halfmoves: 0,
             history: vec![],
             attack_bitboards: [Bitboard::default(); Color::COUNT],
+            zobrist_key: 0,
         };
 
         let mut y = 0u32;
@@ -198,30 +205,32 @@ impl Game {
             y += 1;
         }
 
-        game.side = match parts.next() {
-            Some("w") => Color::White,
-            Some("b") => Color::Black,
+        match parts.next() {
+            Some("b") => game.update_turn(0), // to flip turn
+            Some("w") => {}
             _ => panic!("Incorrect FEN format"),
         };
 
+        let mut castling_flags = 0;
         for c in parts.next().unwrap().chars() {
             match c {
-                'k' => game.castling_flags |= 0b00000001,
-                'q' => game.castling_flags |= 0b00000010,
-                'K' => game.castling_flags |= 0b00000100,
-                'Q' => game.castling_flags |= 0b00001000,
+                'k' => castling_flags |= 0b00000001,
+                'q' => castling_flags |= 0b00000010,
+                'K' => castling_flags |= 0b00000100,
+                'Q' => castling_flags |= 0b00001000,
                 _ => {}
             }
         }
+        game.update_castling_flags(castling_flags);
 
-        game.en_passant_bitmap = match parts.next() {
-            Some("-") => 0,
+        match parts.next() {
+            Some("-") => {}
             Some(board_square_string) => match BoardSquare::parse(board_square_string) {
-                Some(square) => square.to_mask(),
+                Some(square) => game.update_en_passant_bitmap(square.to_mask()),
                 _ => panic!("FEN parsing failure: incorrect En Passant target square"),
             },
             _ => panic!("FEN parsing failure: incorrect En Passant target square"),
-        };
+        }
 
         game.halfmoves_since_capture = parts.next().unwrap_or("0").parse::<usize>().unwrap();
 
@@ -349,6 +358,8 @@ impl Game {
         self.piece_bitboards[piece as usize] &= !mask;
         self.color_bitboards[color as usize] &= !mask;
         self.pieces[square as usize] = None;
+
+        self.zobrist_key ^= ZOBRIST.pieces[color as usize][piece as usize][square as usize];
     }
 
     fn set_piece(&mut self, square: BoardSquare, colored_piece @ (piece, color): ColoredPiece) {
@@ -359,6 +370,36 @@ impl Game {
         self.piece_bitboards[piece as usize] |= mask;
         self.color_bitboards[color as usize] |= mask;
         self.pieces[square as usize] = Some(colored_piece);
+
+        self.zobrist_key ^= ZOBRIST.pieces[color as usize][piece as usize][square as usize];
+    }
+
+    fn update_turn(&mut self, delta: isize) {
+        self.side = !self.side;
+        self.halfmoves = self.halfmoves.wrapping_add_signed(delta);
+
+        self.zobrist_key ^= ZOBRIST.side_to_move;
+    }
+
+    fn update_castling_flags(&mut self, castling_flags: u8) {
+        self.zobrist_key ^= ZOBRIST.castling[self.castling_flags as usize];
+        self.castling_flags = castling_flags;
+        self.zobrist_key ^= ZOBRIST.castling[castling_flags as usize];
+    }
+
+    fn update_en_passant_bitmap(&mut self, en_passant_bitmap: Bitboard) {
+        // TODO: remove ifs with add/bit magic
+        if self.en_passant_bitmap != 0 {
+            let previous_column = (self.en_passant_bitmap.trailing_zeros() as BoardSquare).get_x();
+            self.zobrist_key ^= ZOBRIST.en_passant[previous_column as usize + 1];
+        }
+
+        self.en_passant_bitmap = en_passant_bitmap;
+
+        if en_passant_bitmap != 0 {
+            let new_column = (en_passant_bitmap.trailing_zeros() as BoardSquare).get_x();
+            self.zobrist_key ^= ZOBRIST.en_passant[new_column as usize + 1];
+        }
     }
 
     pub(crate) fn unmake_move(&mut self) {
@@ -373,10 +414,13 @@ impl Game {
         self.unset_piece(board_move.to);
 
         // if we promoted, make sure to unpromote
-        self.set_piece(board_move.from, match board_move.promotion {
-            None => colored_piece,
-            Some(_) => (Piece::Pawn, color),
-        });
+        self.set_piece(
+            board_move.from,
+            match board_move.promotion {
+                None => colored_piece,
+                Some(_) => (Piece::Pawn, color),
+            },
+        );
 
         // place the captured piece back
         if let Some(c_colored_piece) = captured_piece {
@@ -384,8 +428,8 @@ impl Game {
         }
 
         // restore bitmaps / flags
-        self.castling_flags = castling_flags;
-        self.en_passant_bitmap = en_passant_bitmap;
+        self.update_castling_flags(castling_flags);
+        self.update_en_passant_bitmap(en_passant_bitmap);
 
         // uncastle, if the king moved 2 spots; since we're indexing by rows, this should work
         if piece == Piece::King && board_move.from.abs_diff(board_move.to) == 2 {
@@ -413,9 +457,7 @@ impl Game {
             self.set_piece(captured_pawn_square, (Piece::Pawn, !color));
         }
 
-        self.side = !self.side;
-        self.halfmoves -= 1;
-
+        self.update_turn(-1);
         self.update_attack_bitboards()
     }
 
@@ -434,22 +476,22 @@ impl Game {
             self.en_passant_bitmap,
         ));
 
-        self.side = !self.side;
-        self.halfmoves += 1;
-
         // remove captured piece
         if captured_piece.is_some() {
             self.unset_piece(board_move.to);
 
             // if we capture rooks, modify the flag of the side whose rook it was
             if let Some((Piece::Rook, c)) = captured_piece {
-                self.castling_flags &= !match (c, board_move.to) {
-                    (Color::Black, BoardSquare::A8) => 1,
-                    (Color::Black, BoardSquare::H8) => 2,
-                    (Color::White, BoardSquare::A1) => 4,
-                    (Color::White, BoardSquare::H1) => 8,
-                    _ => 0,
-                };
+                let castling_flags = self.castling_flags
+                    & !match (c, board_move.to) {
+                        (Color::Black, BoardSquare::A8) => 1,
+                        (Color::Black, BoardSquare::H8) => 2,
+                        (Color::White, BoardSquare::A1) => 4,
+                        (Color::White, BoardSquare::H1) => 8,
+                        _ => 0,
+                    };
+
+                self.update_castling_flags(castling_flags);
             }
         }
 
@@ -476,23 +518,26 @@ impl Game {
         }
 
         // set en-passant bit if pawn went two tiles (i.e. two full rows)
-        if piece == Piece::Pawn && board_move.from.abs_diff(board_move.to) == 16 {
-            self.en_passant_bitmap = ((board_move.from + board_move.to) / 2).to_mask();
-        } else {
-            self.en_passant_bitmap = 0;
-        }
+        self.update_en_passant_bitmap(
+            if piece == Piece::Pawn && board_move.from.abs_diff(board_move.to) == 16 {
+                ((board_move.from + board_move.to) / 2).to_mask()
+            } else {
+                0
+            },
+        );
 
         // rook moves & castling
         if piece == Piece::Rook && !promoted {
-            let i = match (color, board_move.from) {
-                (Color::Black, BoardSquare::A8) => 1,
-                (Color::Black, BoardSquare::H8) => 2,
-                (Color::White, BoardSquare::A1) => 4,
-                (Color::White, BoardSquare::H1) => 8,
-                _ => 0,
-            };
+            let castling_flags = self.castling_flags
+                & !match (color, board_move.from) {
+                    (Color::Black, BoardSquare::A8) => 1,
+                    (Color::Black, BoardSquare::H8) => 2,
+                    (Color::White, BoardSquare::A1) => 4,
+                    (Color::White, BoardSquare::H1) => 8,
+                    _ => 0,
+                };
 
-            self.castling_flags &= !i;
+            self.update_castling_flags(castling_flags);
         }
 
         // king moves
@@ -510,9 +555,10 @@ impl Game {
             }
 
             // either way no more castling for this side
-            self.castling_flags &= !(0b11 << (2 * color as usize));
+            self.update_castling_flags(self.castling_flags & !(0b11 << (2 * color as usize)));
         }
 
+        self.update_turn(1);
         self.update_attack_bitboards()
     }
 
@@ -550,13 +596,14 @@ impl Game {
             let result = match color {
                 // the & with the random number prevents 'loop around' attacks
                 // where the pawn attacks on the other side of the board
+                // TODO: crashes for debug builds because of << shifts out
                 Color::White => {
-                    ((1 << (square + 9)) & !0x0101010101010101)
-                        | ((1 << (square + 7)) & !(0x0101010101010101 << 7))
+                    ((1 << square.wrapping_add(9)) & !0x0101010101010101)
+                        | ((1 << square.wrapping_add(7)) & !(0x0101010101010101 << 7))
                 }
                 Color::Black => {
-                    ((1 << (square - 9)) & !(0x0101010101010101 << 7))
-                        | ((1 << (square - 7)) & !0x0101010101010101)
+                    ((1 << square.wrapping_sub(9)) & !(0x0101010101010101 << 7))
+                        | ((1 << square.wrapping_sub(7)) & !0x0101010101010101)
                 }
             };
 
