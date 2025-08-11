@@ -190,7 +190,7 @@ impl GameController {
             }
         }
 
-        table.insert((self.game.zobrist_key ^ depth as u64), total_count);
+        table.insert(self.game.zobrist_key ^ depth as u64, total_count);
 
         self.game.unmake_move();
 

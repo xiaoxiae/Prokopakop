@@ -302,32 +302,32 @@ fn test_perft_positions_depth(min_depth: usize, max_depth: usize) {
         // Position 1: Starting position
         (
             "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
-            vec![(1, 20), (2, 400), (3, 8902), (4, 197281), (5, 4865609)],
+            vec![20, 400, 8902, 197281, 4865609, 119060324],
         ),
         // Position 2: Kiwipete
         (
             "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq -",
-            vec![(1, 48), (2, 2039), (3, 97862), (4, 4085603)],
+            vec![48, 2039, 97862, 4085603, 193690690, 8031647685],
         ),
         // Position 3: Position with en passant and castling
         (
             "8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - -",
-            vec![(1, 14), (2, 191), (3, 2812), (4, 43238)],
+            vec![14, 191, 2812, 43238, 674624, 11030083],
         ),
         // Position 4: Complex position with promotions
         (
             "r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq -",
-            vec![(1, 6), (2, 264), (3, 9467), (4, 422333)],
+            vec![6, 264, 9467, 422333, 15833292, 706045033],
         ),
         // Position 5: Another complex position
         (
             "rnbq1k1r/pp1Pbppp/2p5/8/2B5/8/PPP1NnPP/RNBQK2R w KQ - 1 8",
-            vec![(1, 44), (2, 1486), (3, 62379), (4, 2103487)],
+            vec![44, 1486, 62379, 2103487, 89941194],
         ),
         // Position 6: Balanced middle game position
         (
             "r4rk1/1pp1qppp/p1np1n2/2b1p1B1/2B1P1b1/P1NP1N2/1PP1QPPP/R4RK1 w - - 0 10",
-            vec![(1, 46), (2, 2079), (3, 89890), (4, 3894594)],
+            vec![46, 2079, 89890, 3894594, 164075551, 6923051137],
         ),
     ];
 
@@ -335,7 +335,9 @@ fn test_perft_positions_depth(min_depth: usize, max_depth: usize) {
         println!("Testing position: {}", position_fen);
         controller.new_game_from_fen(position_fen);
 
-        for &(depth, expected_count) in depth_counts {
+        for (depth, expected_count) in depth_counts.iter().enumerate() {
+            let depth = depth + 1; // Convert from 0-based index to 1-based depth
+
             if !(min_depth <= depth && depth <= max_depth) {
                 continue;
             }
@@ -351,7 +353,7 @@ fn test_perft_positions_depth(min_depth: usize, max_depth: usize) {
                 depth, total_nodes, expected_count, elapsed
             );
 
-            if total_nodes != expected_count {
+            if total_nodes != *expected_count {
                 failures.push(format!(
                     "Position '{}' at depth {}: got {} nodes, expected {}",
                     position_fen, depth, total_nodes, expected_count
