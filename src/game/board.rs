@@ -3,8 +3,8 @@ use crate::game::ColoredPiece;
 use crate::utils::Bitboard;
 use crate::zobris::ZOBRIST;
 use crate::{
-    ATTACK_BITBOARDS, BitboardExt, BoardSquare, BoardSquareExt, MAGIC_BISHOP_BLOCKER_BITBOARD,
-    MAGIC_ENTRIES, MAGIC_ROOK_BLOCKER_BITBOARD, MAGIC_TABLE,
+    BitboardExt, BoardSquare, BoardSquareExt, MAGIC_BISHOP_BLOCKER_BITBOARD, MAGIC_ENTRIES,
+    MAGIC_ROOK_BLOCKER_BITBOARD, MAGIC_TABLE, PIECE_MOVE_BITBOARDS,
 };
 use std::cmp::PartialEq;
 use strum::EnumCount;
@@ -83,7 +83,7 @@ impl Iterator for ValidMovesIterator {
             return None;
         }
 
-        let to_square = self.bitboard.trailing_zeros() as u8;
+        let to_square = self.bitboard.next_index();
 
         if self.is_promoting {
             let result = Some(BoardMove {
@@ -142,8 +142,6 @@ pub struct Game {
     pub color_bitboards: [Bitboard; Color::COUNT],
     pub piece_bitboards: [Bitboard; Piece::COUNT],
 
-    pub attack_bitboards: [Bitboard; Color::COUNT],
-
     pub halfmoves: usize,
     pub halfmoves_since_capture: usize,
 
@@ -171,7 +169,6 @@ impl Game {
             halfmoves_since_capture: 0,
             halfmoves: 0,
             history: vec![],
-            attack_bitboards: [Bitboard::default(); Color::COUNT],
             zobrist_key: 0,
         };
 
@@ -334,21 +331,6 @@ impl Game {
         fen
     }
 
-    ///
-    /// Update the attack/defense bitboards for both colors.
-    ///
-    fn update_attack_bitboards(&mut self) {
-        for color in Color::iter() {
-            let mut bitboard = Bitboard::default();
-
-            for board_square in self.color_bitboards[color as usize].iter_set_positions() {
-                bitboard |= self.get_attack_bitboard(board_square)
-            }
-
-            self.attack_bitboards[color as usize] = bitboard;
-        }
-    }
-
     fn unset_piece(&mut self, square: BoardSquare) {
         debug_assert!(self.pieces[square as usize].is_some());
 
@@ -390,14 +372,14 @@ impl Game {
     fn update_en_passant_bitmap(&mut self, en_passant_bitmap: Bitboard) {
         // TODO: remove ifs with add/bit magic
         if self.en_passant_bitmap != 0 {
-            let previous_column = (self.en_passant_bitmap.trailing_zeros() as BoardSquare).get_x();
+            let previous_column = self.en_passant_bitmap.next_index().get_x();
             self.zobrist_key ^= ZOBRIST.en_passant[previous_column as usize + 1];
         }
 
         self.en_passant_bitmap = en_passant_bitmap;
 
         if en_passant_bitmap != 0 {
-            let new_column = (en_passant_bitmap.trailing_zeros() as BoardSquare).get_x();
+            let new_column = en_passant_bitmap.next_index().get_x();
             self.zobrist_key ^= ZOBRIST.en_passant[new_column as usize + 1];
         }
     }
@@ -475,7 +457,6 @@ impl Game {
         }
 
         self.update_turn(-1);
-        self.update_attack_bitboards()
     }
 
     ///
@@ -501,6 +482,9 @@ impl Game {
             self.unset_piece(board_move.to);
 
             // if we capture rooks, modify the flag of the side whose rook it was
+            //
+            // we kind of need to do this since FEN requires this, and even despite
+            // there could be fuckery with taking rook, promoting and going back
             if let Some((Piece::Rook, c)) = captured_piece {
                 let castling_flags = self.castling_flags
                     & !match (c, board_move.to) {
@@ -579,7 +563,6 @@ impl Game {
         }
 
         self.update_turn(1);
-        self.update_attack_bitboards()
     }
 
     ///
@@ -609,6 +592,9 @@ impl Game {
         MAGIC_ENTRIES[table_offset + (magic_number.wrapping_mul(key) >> bit_offset) as usize]
     }
 
+    ///
+    /// Retrieve attack moves for the piece at the particular square.
+    ///
     fn get_piece_attack_bitboard(
         &self,
         square: BoardSquare,
@@ -633,7 +619,7 @@ impl Game {
         }
 
         // use pre-calculated attack bitboards for other pieces
-        let mut valid_moves = ATTACK_BITBOARDS[piece as usize][square as usize];
+        let mut valid_moves = PIECE_MOVE_BITBOARDS[piece as usize][square as usize];
 
         match piece {
             // Slider stuff using magic bitmaps
@@ -651,11 +637,61 @@ impl Game {
     }
 
     ///
-    /// Retrieve attack moves for the piece at the particular square.
-    /// Useful for preventing the king from getting narked.
+    /// Return true/false whether we can kingside/queenside castle for the particular color.
+    /// The piece is king/queen for kingside/queenside castling.
     ///
-    fn get_attack_bitboard(&self, square: BoardSquare) -> Bitboard {
-        self.get_piece_attack_bitboard(square, self.pieces[square as usize].unwrap())
+    fn can_castle(&self, piece: Piece, color: Color) -> bool {
+        // return false immediately if we can't castle because of castling flags
+        if match (piece, color) {
+            (Piece::Queen, Color::Black) => 0b0001,
+            (Piece::King, Color::Black) => 0b0010,
+            (Piece::Queen, Color::White) => 0b0100,
+            (Piece::King, Color::White) => 0b1000,
+            _ => unreachable!(),
+        } & self.castling_flags
+            == 0
+        {
+            return false;
+        }
+
+        // we can only castle if there are no blocking pieces
+        // this gives us the blockers in the castling row
+        let castling_blockers = self.all_pieces_bitboard() >> (color as usize ^ 1) * 56;
+
+        if match piece {
+            Piece::Queen => 0b00001110,
+            Piece::King => 0b01100000,
+            _ => unreachable!(),
+        } & castling_blockers
+            != 0
+        {
+            return false;
+        }
+
+        // finally, if there are checks in the castling directions, we can't castle either
+        if match (piece, color) {
+            (Piece::Queen, Color::Black) => {
+                self.is_square_attacked(BoardSquare::C8, !color)
+                    || self.is_square_attacked(BoardSquare::D8, !color)
+            }
+            (Piece::King, Color::Black) => {
+                self.is_square_attacked(BoardSquare::F8, !color)
+                    || self.is_square_attacked(BoardSquare::G8, !color)
+            }
+            (Piece::Queen, Color::White) => {
+                self.is_square_attacked(BoardSquare::C1, !color)
+                    || self.is_square_attacked(BoardSquare::D1, !color)
+            }
+            (Piece::King, Color::White) => {
+                self.is_square_attacked(BoardSquare::F1, !color)
+                    || self.is_square_attacked(BoardSquare::G1, !color)
+            }
+            _ => unreachable!(),
+        } {
+            return false;
+        }
+
+        true
     }
 
     ///
@@ -664,13 +700,13 @@ impl Game {
     /// current turn (i.e. ignoring `this.side`).
     ///
     fn get_pseudo_legal_move_bitboard(&self, square: BoardSquare) -> Bitboard {
-        let (piece, color) = match self.pieces[square as usize] {
+        let colored_piece @ (piece, color) = match self.pieces[square as usize] {
             Some(v) => v,
             None => return 0,
         };
 
         // Obtain attack move bitboard, which are also regular moves for all but pawns
-        let mut valid_moves = self.get_attack_bitboard(square);
+        let mut valid_moves = self.get_piece_attack_bitboard(square, colored_piece);
 
         match piece {
             // Pawn stuff
@@ -697,39 +733,16 @@ impl Game {
             }
             // King stuff
             Piece::King => {
-                // we can only castle if there are no blocking pieces
-                let castling_blockers = self.all_pieces_bitboard() >> (color as usize ^ 1) * 56;
-
-                // and further if there is no check in the castling directions
-                let castling_attackers =
-                    self.attack_bitboards[!color as usize] >> (color as usize ^ 1) * 56;
-
-                // 0bQK, where KQ is queenside/kingside castling respectively
-                let castling_blocker_bits = (((0b00001110 & castling_blockers) == 0) as usize
-                    | ((((0b01100000 & castling_blockers) == 0) as usize) << 1))
-                    & (((0b00001100 & castling_attackers) == 0) as usize
-                        | ((((0b01100000 & castling_attackers) == 0) as usize) << 1));
-
-                // if the king is not under check, we can castle
-                if self.attack_bitboards[!color as usize]
-                    & self.colored_piece_bitboard((Piece::King, color))
-                    == 0
-                {
-                    // castling bits for the particular color
-                    let castling_bits =
-                        self.castling_flags >> (color as usize * 2) & castling_blocker_bits as u8;
-
-                    // fun optimization -- multiplying by 9 yields almost the correct bitboards:
-                    // 0b00 * 9 -> b00000
-                    // 0b01 * 9 -> b01001
-                    // 0b10 * 9 -> b10010
-                    // 0b11 * 9 -> b11011
-                    valid_moves |=
-                        ((castling_bits as u64 * 9 & 0b10001) << 2) << ((color as usize ^ 1) * 56)
+                // only castle if not under attack
+                if !self.is_square_attacked(
+                    self.colored_piece_bitboard((Piece::King, color))
+                        .next_index(),
+                    !color,
+                ) {
+                    valid_moves |= ((self.can_castle(Piece::Queen, color) as u64) << 2
+                        | (self.can_castle(Piece::King, color) as u64) << 6)
+                        << ((color as usize ^ 1) * 56)
                 }
-
-                // also never move into attacks
-                valid_moves &= !self.attack_bitboards[!color as usize];
             }
             _ => {}
         }
@@ -779,7 +792,7 @@ impl Game {
     pub fn get_pinner_bitboards(&self) -> [Bitboard; 2] {
         let king_position = self
             .colored_piece_bitboard((Piece::King, self.side))
-            .trailing_zeros() as BoardSquare;
+            .next_index();
 
         let mut pinners = [0, 0];
 
@@ -819,7 +832,7 @@ impl Game {
 
                 let king_position = self
                     .colored_piece_bitboard((Piece::King, !self.side))
-                    .trailing_zeros() as BoardSquare;
+                    .next_index();
 
                 if !self.is_square_attacked(king_position, self.side) {
                     resulting_positions[count] = board_move;

@@ -1,6 +1,6 @@
 use crate::game::{Color, Piece};
-use rayon::prelude::*;
 use rand::RngCore;
+use rayon::prelude::*;
 use std::fs::File;
 use std::io::{Result, Write};
 use std::path::Path;
@@ -10,6 +10,7 @@ pub type Bitboard = u64;
 pub type BoardSquare = u8;
 
 pub trait BitboardExt {
+    fn next_index(&self) -> BoardSquare;
     fn is_set(&self, index: BoardSquare) -> bool;
     fn print(&self, title: Option<&str>, position: Option<BoardSquare>);
     fn iter_set_positions(&self) -> BitboardIterator;
@@ -26,6 +27,10 @@ pub const fn is_position_valid(x: isize, y: isize) -> bool {
 }
 
 impl BitboardExt for u64 {
+    fn next_index(&self) -> BoardSquare {
+        self.trailing_zeros() as BoardSquare
+    }
+
     fn is_set(&self, index: BoardSquare) -> bool {
         self & (1 << index) != 0
     }
@@ -376,7 +381,7 @@ const fn calculate_pawn_attack_moves() -> PawnAttackBitboards {
     bitboards
 }
 
-pub const ATTACK_BITBOARDS: ValidMoveBitboards = calculate_attack_bitboards_for_pieces();
+pub const PIECE_MOVE_BITBOARDS: ValidMoveBitboards = calculate_attack_bitboards_for_pieces();
 pub const PAWN_ATTACK_BITBOARDS: PawnAttackBitboards = calculate_pawn_attack_moves();
 
 pub const MAGIC_ROOK_BLOCKER_BITBOARD: PieceBitboards =
@@ -416,7 +421,7 @@ pub fn calculate_magic_bitboard(
     x: usize,
     y: usize,
     piece: &Piece,
-    target_max_index: Option<usize>
+    target_max_index: Option<usize>,
 ) -> MagicBitboardEntry {
     let possible_blockers_bitboard = match piece {
         Piece::Bishop => MAGIC_BISHOP_BLOCKER_BITBOARD[x + y * 8],
@@ -453,7 +458,11 @@ pub fn calculate_magic_bitboard(
 
     let mut rng = rand::rng();
     let magic_bitmap_size = blocker_count;
-    let max_attempts = if target_max_index.is_some() { 1_000_000 } else { 100_000 };
+    let max_attempts = if target_max_index.is_some() {
+        1_000_000
+    } else {
+        100_000
+    };
     let mut attempts = 0;
 
     loop {
@@ -706,12 +715,20 @@ pub fn generate_magic_bitboards() {
                 .expect("Failed to serialize improved magic bitboards");
 
             let total_entries: usize = magic_bitboards.iter().map(|e| e.max_index + 1).sum();
-            log::info!("Total entries after iteration {}: {}", iteration, total_entries);
+            log::info!(
+                "Total entries after iteration {}: {}",
+                iteration,
+                total_entries
+            );
         }
 
         if iteration % 10 == 0 {
             let total_entries: usize = magic_bitboards.iter().map(|e| e.max_index + 1).sum();
-            log::info!("Completed {} iterations. Total entries: {}", iteration, total_entries);
+            log::info!(
+                "Completed {} iterations. Total entries: {}",
+                iteration,
+                total_entries
+            );
         }
     }
 }
