@@ -1,4 +1,4 @@
-use crate::game::{BoardMove, Color, Game, MoveResultType};
+use crate::game::{BoardMove, BoardMoveExt, Color, Game, MoveResultType};
 use crate::{BoardSquare, BoardSquareExt};
 use fxhash::FxHashMap;
 
@@ -35,7 +35,7 @@ impl GameController {
         self.new_game();
     }
 
-    pub fn print_with_moves(&self, possible_moves: Vec<&BoardSquare>) {
+    pub fn print_with_moves(&self, possible_moves: Vec<BoardSquare>) {
         const RESET: &str = "\x1b[0m";
         const LIGHT_SQUARE_BG: &str = "\x1b[48;5;172m";
         const DARK_SQUARE_BG: &str = "\x1b[48;5;130m";
@@ -122,7 +122,7 @@ impl GameController {
     pub fn try_move_piece(&mut self, long_algebraic_notation: String) -> MoveResultType {
         match BoardMove::parse(long_algebraic_notation.as_str()) {
             Some(board_move) => {
-                let (valid_moves, _) = self.game.get_current_position_moves();
+                let (valid_moves, _) = self.game.get_moves();
 
                 if valid_moves.contains(&board_move) {
                     self.game.make_move(board_move);
@@ -150,7 +150,7 @@ impl GameController {
         let mut move_breakdown = vec![];
 
         // Get all valid moves for the current position
-        let (current_moves, count) = self.game.get_current_position_moves();
+        let (current_moves, count) = self.game.get_moves();
 
         for board_move in current_moves.into_iter().take(count) {
             let move_count = self.dfs_count_moves(board_move.clone(), depth, &mut table);
@@ -179,7 +179,7 @@ impl GameController {
 
         let mut total_count = 0;
 
-        let (current_moves, count) = self.game.get_current_position_moves();
+        let (current_moves, count) = self.game.get_moves();
 
         // Bulk counting
         if depth == 1 {

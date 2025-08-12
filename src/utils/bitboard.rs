@@ -13,7 +13,7 @@ pub trait BitboardExt {
     fn next_index(&self) -> BoardSquare;
     fn is_set(&self, index: BoardSquare) -> bool;
     fn print(&self, title: Option<&str>, position: Option<BoardSquare>);
-    fn iter_set_positions(&self) -> BitboardIterator;
+    fn iter_positions(&self) -> BitboardIterator;
 }
 
 // used like this because we can't have a const fn as a trait,
@@ -69,7 +69,7 @@ impl BitboardExt for u64 {
         }
     }
 
-    fn iter_set_positions(&self) -> BitboardIterator {
+    fn iter_positions(&self) -> BitboardIterator {
         BitboardIterator { remaining: *self }
     }
 }

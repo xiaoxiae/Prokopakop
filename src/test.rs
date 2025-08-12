@@ -75,7 +75,7 @@ fn test_zobrist_consistency_recursive(
     let initial_zobrist = controller.game.zobrist_key;
     let initial_fen = controller.game.get_fen();
 
-    let (moves, move_count) = controller.game.get_current_position_moves();
+    let (moves, move_count) = controller.game.get_moves();
 
     for board_move in moves.into_iter().take(move_count) {
         let move_str = format!("{:?}", board_move); // Adjust this based on your move representation
@@ -184,7 +184,7 @@ fn test_transpositions_recursive(
         seen_positions.insert(zobrist_key, (current_fen, current_path.clone()));
     }
 
-    let (moves, move_count) = controller.game.get_current_position_moves();
+    let (moves, move_count) = controller.game.get_moves();
 
     for board_move in moves.into_iter().take(move_count) {
         let move_str = format!("{:?}", board_move);

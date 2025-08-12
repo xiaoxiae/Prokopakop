@@ -4,7 +4,7 @@ mod test;
 mod utils;
 
 pub use crate::controller::*;
-use crate::game::{MoveResultType, Piece};
+use crate::game::{BoardMoveExt, MoveResultType, Piece};
 pub use crate::utils::*;
 use clap::{Arg, Command};
 
@@ -137,8 +137,8 @@ fn main() {
                             let moves_to = moves
                                 .iter()
                                 .map(|(m, _)| m)
-                                .filter(|m| m.from == square)
-                                .map(|m| &m.to)
+                                .filter(|m| m.get_from() == square)
+                                .map(|&m| m.get_to())
                                 .collect::<Vec<_>>();
 
                             controller.print_with_moves(moves_to);

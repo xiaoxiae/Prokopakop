@@ -6,28 +6,47 @@ use crate::{
     BitboardExt, BoardSquare, BoardSquareExt, MAGIC_BISHOP_BLOCKER_BITBOARD, MAGIC_ENTRIES,
     MAGIC_ROOK_BLOCKER_BITBOARD, MAGIC_TABLE, PIECE_MOVE_BITBOARDS,
 };
-use std::cmp::PartialEq;
 use strum::EnumCount;
 use strum::IntoEnumIterator;
 
-// TODO: this should be more compact, we're using too many bits here
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub struct BoardMove {
-    pub from: BoardSquare,
-    pub to: BoardSquare,
-    pub promotion: Option<Piece>,
+pub type BoardMove = u16;
+
+pub trait BoardMoveExt {
+    fn new(from: BoardSquare, to: BoardSquare, promotion: Option<Piece>) -> BoardMove;
+    fn get_from(&self) -> BoardSquare;
+    fn get_to(&self) -> BoardSquare;
+    fn get_promotion(&self) -> Option<Piece>;
+    fn parse(string: &str) -> Option<BoardMove>;
+    fn unparse(&self) -> String;
 }
 
-impl BoardMove {
-    pub fn default() -> BoardMove {
-        BoardMove {
-            from: 0,
-            to: 0,
-            promotion: None,
+impl BoardMoveExt for u16 {
+    fn new(from: BoardSquare, to: BoardSquare, promotion: Option<Piece>) -> BoardMove {
+        (from as u16)
+            | ((to as u16) << 6)
+            | ((promotion
+                .and_then(|p| Some(1 << (p as u16)))
+                .unwrap_or_default())
+                << 12)
+    }
+
+    fn get_from(&self) -> BoardSquare {
+        (*self as BoardSquare) & 0b111111
+    }
+    fn get_to(&self) -> BoardSquare {
+        ((*self >> 6) as BoardSquare) & 0b111111
+    }
+
+    fn get_promotion(&self) -> Option<Piece> {
+        let shifted = *self >> 12;
+        if shifted == 0 {
+            None
+        } else {
+            Piece::from_repr(shifted.trailing_zeros() as usize)
         }
     }
 
-    pub fn parse(string: &str) -> Option<BoardMove> {
+    fn parse(string: &str) -> Option<BoardMove> {
         let from = string.get(0..2);
         let to = string.get(2..4);
 
@@ -45,21 +64,17 @@ impl BoardMove {
             from.and_then(BoardSquare::parse),
             to.and_then(BoardSquare::parse),
         ) {
-            (Some(from), Some(to)) => Some(BoardMove {
-                from,
-                to,
-                promotion,
-            }),
+            (Some(from), Some(to)) => Some(BoardMove::new(from, to, promotion)),
             _ => None,
         }
     }
 
-    pub fn unparse(&self) -> String {
+    fn unparse(&self) -> String {
         format!(
             "{}{}{}",
-            self.from.unparse(),
-            self.to.unparse(),
-            self.promotion
+            self.get_from().unparse(),
+            self.get_to().unparse(),
+            self.get_promotion()
                 .and_then(|p| Some(p.to_char().to_string()))
                 .unwrap_or("".to_string())
         )
@@ -86,11 +101,11 @@ impl Iterator for ValidMovesIterator {
         let to_square = self.bitboard.next_index();
 
         if self.is_promoting {
-            let result = Some(BoardMove {
-                from: self.square,
-                to: to_square,
-                promotion: Piece::from_repr(self.current_promotion),
-            });
+            let result = Some(BoardMove::new(
+                self.square,
+                to_square,
+                Piece::from_repr(self.current_promotion),
+            ));
 
             self.current_promotion += 1;
 
@@ -103,11 +118,7 @@ impl Iterator for ValidMovesIterator {
         } else {
             self.bitboard &= self.bitboard - 1;
 
-            Some(BoardMove {
-                from: self.square.clone(),
-                to: to_square,
-                promotion: None,
-            })
+            Some(BoardMove::new(self.square.clone(), to_square, None))
         }
     }
 
@@ -405,17 +416,17 @@ impl Game {
         let (board_move, captured_piece, castling_flags, en_passant_bitmap) =
             self.history.pop().unwrap();
 
-        let colored_piece @ (piece, color) = self.pieces[board_move.to as usize].expect(
+        let colored_piece @ (piece, color) = self.pieces[board_move.get_to() as usize].expect(
             "No piece at target square when unmaking a move. This should never ever happen.",
         );
 
         // move the piece back
-        self.unset_piece(board_move.to);
+        self.unset_piece(board_move.get_to());
 
         // if we promoted, make sure to unpromote
         self.set_piece(
-            board_move.from,
-            match board_move.promotion {
+            board_move.get_from(),
+            match board_move.get_promotion() {
                 None => colored_piece,
                 Some(_) => (Piece::Pawn, color),
             },
@@ -423,7 +434,7 @@ impl Game {
 
         // place the captured piece back
         if let Some(c_colored_piece) = captured_piece {
-            self.set_piece(board_move.to, c_colored_piece);
+            self.set_piece(board_move.get_to(), c_colored_piece);
         }
 
         // restore bitmaps / flags
@@ -431,27 +442,29 @@ impl Game {
         self.update_en_passant_bitmap(en_passant_bitmap);
 
         // uncastle, if the king moved 2 spots; since we're indexing by rows, this should work
-        if piece == Piece::King && board_move.from.abs_diff(board_move.to) == 2 {
+        if piece == Piece::King && board_move.get_from().abs_diff(board_move.get_to()) == 2 {
             self.set_piece(
                 BoardSquare::from_position(
                     // bit hack: the to X position is either 2 (0b10) or 6 (0b110),
                     // so >> gives us a flag whether it's the first or last file
-                    (board_move.to.get_x() >> 2) * 7,
-                    board_move.from.get_y(),
+                    (board_move.get_to().get_x() >> 2) * 7,
+                    board_move.get_from().get_y(),
                 ),
                 (Piece::Rook, color),
             );
 
-            self.unset_piece((board_move.from + board_move.to) / 2);
+            self.unset_piece((board_move.get_from() + board_move.get_to()) / 2);
         }
 
         // if pawn moves in a cross manner and doesn't capture piece, en-passant happened
         if piece == Piece::Pawn
             && captured_piece.is_none()
-            && board_move.to.get_x() != board_move.from.get_x()
+            && board_move.get_to().get_x() != board_move.get_from().get_x()
         {
-            let captured_pawn_square =
-                BoardSquare::from_position(board_move.to.get_x(), board_move.from.get_y());
+            let captured_pawn_square = BoardSquare::from_position(
+                board_move.get_to().get_x(),
+                board_move.get_from().get_y(),
+            );
 
             self.set_piece(captured_pawn_square, (Piece::Pawn, !color));
         }
@@ -465,10 +478,10 @@ impl Game {
     pub(crate) fn make_move(&mut self, board_move: BoardMove) {
         let mut promoted = false;
 
-        let (mut piece, color) = self.pieces[board_move.from as usize]
+        let (mut piece, color) = self.pieces[board_move.get_from() as usize]
             .expect("No piece at the source square while making a move.");
 
-        let captured_piece = self.pieces[board_move.to as usize];
+        let captured_piece = self.pieces[board_move.get_to() as usize];
 
         self.history.push((
             board_move,
@@ -479,7 +492,7 @@ impl Game {
 
         // remove captured piece
         if captured_piece.is_some() {
-            self.unset_piece(board_move.to);
+            self.unset_piece(board_move.get_to());
 
             // if we capture rooks, modify the flag of the side whose rook it was
             //
@@ -487,7 +500,7 @@ impl Game {
             // there could be fuckery with taking rook, promoting and going back
             if let Some((Piece::Rook, c)) = captured_piece {
                 let castling_flags = self.castling_flags
-                    & !match (c, board_move.to) {
+                    & !match (c, board_move.get_to()) {
                         (Color::Black, BoardSquare::A8) => 1,
                         (Color::Black, BoardSquare::H8) => 2,
                         (Color::White, BoardSquare::A1) => 4,
@@ -500,31 +513,33 @@ impl Game {
         }
 
         // moves + promotions
-        self.unset_piece(board_move.from);
+        self.unset_piece(board_move.get_from());
 
         // if pawn reaches the last rank, promote!
-        if piece == Piece::Pawn && (board_move.to.get_y() == 7 || board_move.to.get_y() == 0) {
+        if piece == Piece::Pawn
+            && (board_move.get_to().get_y() == 7 || board_move.get_to().get_y() == 0)
+        {
             piece = board_move
-                .promotion
+                .get_promotion()
                 .expect("Pawn move to last rank must contain promotion information.");
 
             promoted = true;
         }
 
-        self.set_piece(board_move.to, (piece, color));
+        self.set_piece(board_move.get_to(), (piece, color));
 
         // if we moved to the en-passant bit, with a pawn, take
-        if piece == Piece::Pawn && self.en_passant_bitmap.is_set(board_move.to) {
+        if piece == Piece::Pawn && self.en_passant_bitmap.is_set(board_move.get_to()) {
             self.unset_piece(BoardSquare::from_position(
-                board_move.to.get_x(),
-                board_move.from.get_y(),
+                board_move.get_to().get_x(),
+                board_move.get_from().get_y(),
             ))
         }
 
         // set en-passant bit if pawn went two tiles (i.e. two full rows)
         self.update_en_passant_bitmap(
-            if piece == Piece::Pawn && board_move.from.abs_diff(board_move.to) == 16 {
-                ((board_move.from + board_move.to) / 2).to_mask()
+            if piece == Piece::Pawn && board_move.get_from().abs_diff(board_move.get_to()) == 16 {
+                ((board_move.get_from() + board_move.get_to()) / 2).to_mask()
             } else {
                 0
             },
@@ -533,7 +548,7 @@ impl Game {
         // rook moves & castling
         if piece == Piece::Rook && !promoted {
             let castling_flags = self.castling_flags
-                & !match (color, board_move.from) {
+                & !match (color, board_move.get_from()) {
                     (Color::Black, BoardSquare::A8) => 1,
                     (Color::Black, BoardSquare::H8) => 2,
                     (Color::White, BoardSquare::A1) => 4,
@@ -547,15 +562,18 @@ impl Game {
         // king moves
         if piece == Piece::King {
             // castling (move by 2)
-            if board_move.from.abs_diff(board_move.to) == 2 {
+            if board_move.get_from().abs_diff(board_move.get_to()) == 2 {
                 self.unset_piece(BoardSquare::from_position(
                     // bit hack: the to X position is either 2 (0b10) or 6 (0b110),
                     // so >> gives us a flag whether it's the first or last file
-                    (board_move.to.get_x() >> 2) * 7,
-                    board_move.from.get_y(),
+                    (board_move.get_to().get_x() >> 2) * 7,
+                    board_move.get_from().get_y(),
                 ));
 
-                self.set_piece((board_move.from + board_move.to) / 2, (Piece::Rook, color));
+                self.set_piece(
+                    (board_move.get_from() + board_move.get_to()) / 2,
+                    (Piece::Rook, color),
+                );
             }
 
             // either way no more castling for this side
@@ -821,12 +839,11 @@ impl Game {
     ///
     /// Obtain a list of valid moves for the current position.
     ///
-    pub fn get_current_position_moves(&mut self) -> ([BoardMove; MAX_VALID_MOVES], usize) {
-        let position_iterator = self.color_bitboards[self.side as usize].iter_set_positions();
+    pub fn get_moves(&mut self) -> ([BoardMove; MAX_VALID_MOVES], usize) {
         let mut resulting_positions = [BoardMove::default(); MAX_VALID_MOVES];
         let mut count = 0;
 
-        for bitboard in position_iterator {
+        for bitboard in self.color_bitboards[self.side as usize].iter_positions() {
             for board_move in self.get_square_pseudo_legal_moves(bitboard) {
                 self.make_move(board_move);
 
