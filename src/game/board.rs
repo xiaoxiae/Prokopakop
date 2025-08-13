@@ -128,6 +128,41 @@ impl Iterator for ValidMovesIterator {
     }
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct PinInfo {
+    pub pinned_piece_position: BoardSquare,
+    pub valid_move_squares: Bitboard,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct PinData {
+    pub pins: [[PinInfo; 4]; 2], // [bishop_pins, rook_pins]
+    pub pin_counts: [usize; 2],  // [bishop_count, rook_count]
+    pub all_pinned_pieces: Bitboard,
+}
+
+impl PinData {
+    /// Get pin mask for a specific square
+    pub fn get_pin_mask_for_square(&self, square: BoardSquare) -> Option<Bitboard> {
+        // Check if this square has a pinned piece
+        if (self.all_pinned_pieces & (1 << square)) == 0 {
+            return None;
+        }
+
+        // Find the pin info for this square
+        for piece_type in 0..2 {
+            for i in 0..self.pin_counts[piece_type] {
+                let pin_info = &self.pins[piece_type][i];
+                if pin_info.pinned_piece_position == square {
+                    return Some(pin_info.valid_move_squares);
+                }
+            }
+        }
+
+        None
+    }
+}
+
 pub type PieceBoard = [Option<ColoredPiece>; 64];
 
 const MAX_VALID_MOVES: usize = 256;
@@ -784,10 +819,19 @@ impl Game {
     }
 
     ///
-    /// Return valid moves for a particular square.
+    /// Return valid moves for a particular square, optionally masked by pin restrictions.
     ///
-    pub fn get_square_pseudo_legal_moves(&self, square: BoardSquare) -> ValidMovesIterator {
-        let bitboard = self.get_pseudo_legal_move_bitboard(square);
+    pub fn get_square_pseudo_legal_moves(
+        &self,
+        square: BoardSquare,
+        pin_mask: Option<Bitboard>,
+    ) -> ValidMovesIterator {
+        let mut bitboard = self.get_pseudo_legal_move_bitboard(square);
+
+        // Apply pin mask if provided
+        if let Some(mask) = pin_mask {
+            bitboard &= mask;
+        }
 
         // pawn on second to last rank must promote on the last rank
         let is_promoting = self.pieces[square as usize].is_some_and(|(p, c)| {
@@ -805,35 +849,77 @@ impl Game {
     }
 
     ///
-    /// Retrieve bitboards with pieces that are pinning (bishop and rook respectively).
+    /// Retrieve pinning information for rook and bishop attacks.
+    /// Returns structured data with pinned pieces and their valid move squares.
     ///
-    pub fn get_pinner_bitboards(&self) -> [Bitboard; 2] {
+    pub fn get_pinner_bitboards(&self, color: Color) -> PinData {
         let king_position = self
-            .colored_piece_bitboard((Piece::King, self.side))
+            .colored_piece_bitboard((Piece::King, color))
             .next_index();
 
-        let mut pinners = [0, 0];
+        let mut pin_data = PinData::default();
 
-        for (i, &piece) in [Piece::Bishop, Piece::Rook].iter().enumerate() {
-            // first, get occlusions to get possible pinned pieces
-            let possible_blockers_occlusion = self.get_occlusion_bitmap(king_position, piece, None);
+        // we're doing 3 calls to colored_piece_bitboard to get the ray/pieces
+        //
+        //  Atk        |   (3)
+        //   |         |    |
+        //  Pin   |    |    |
+        //   |    |    |    |
+        //  Kng  (1)  (2)   |
+        //
+        for piece in [Piece::Bishop, Piece::Rook] {
+            let piece_idx = piece as usize;
 
-            // next, subtract the calculated occlusions from blockers to get the blocked pieces
-            let possible_attackers_occlusion = self.get_occlusion_bitmap(
+            // (1) get occlusions to get possible pinned pieces
+            let raycast_1 = self.get_occlusion_bitmap(king_position, piece, None);
+
+            // (2) subtract the calculated occlusions from blockers to get the blocked pieces
+            let raycast_2 = self.get_occlusion_bitmap(
                 king_position,
                 piece,
-                Some(self.all_pieces_bitboard() & !possible_blockers_occlusion),
+                Some(self.all_pieces_bitboard() & !raycast_1),
             );
 
             // now we can get a bitmap of the attackers that are pinning things down
-            let attackers_bitmap = (self.colored_piece_bitboard((piece, !self.side))
-                | self.colored_piece_bitboard((Piece::Queen, !self.side)))
-                & (possible_attackers_occlusion & !possible_blockers_occlusion);
+            // queen accounts for both rook and bishop so we count it both times
+            let attacker_positions = (self.colored_piece_bitboard((piece, !color))
+                | self.colored_piece_bitboard((Piece::Queen, !color)))
+                & (raycast_2 & !raycast_1);
 
-            pinners[i] = attackers_bitmap;
+            // for each of these, calculate the pinned piece by casting back from the attacker
+            for attacker_position in attacker_positions.iter_positions() {
+                // (3) cast back from attacker to get the raycast
+                let raycast_3 = self.get_occlusion_bitmap(
+                    attacker_position,
+                    piece,
+                    Some(self.all_pieces_bitboard() & !raycast_1),
+                );
+
+                // only one pinned pieces
+                debug_assert!(
+                    (raycast_3 & raycast_1 & self.all_pieces_bitboard()).count_ones() == 1
+                );
+
+                let pinned_piece_position =
+                    (raycast_3 & raycast_1 & self.all_pieces_bitboard()).next_index();
+
+                let valid_positions = (raycast_2 & raycast_3) | (1 << attacker_position);
+
+                let pin_info = PinInfo {
+                    pinned_piece_position,
+                    valid_move_squares: valid_positions,
+                };
+
+                // Add to all pinned pieces bitboard
+                pin_data.all_pinned_pieces |= 1 << pinned_piece_position;
+
+                // Add to appropriate array using piece value as index
+                pin_data.pins[piece_idx][pin_data.pin_counts[piece_idx]] = pin_info;
+                pin_data.pin_counts[piece_idx] += 1;
+            }
         }
 
-        pinners
+        pin_data
     }
 
     ///
@@ -843,8 +929,13 @@ impl Game {
         let mut resulting_positions = [BoardMove::default(); MAX_VALID_MOVES];
         let mut count = 0;
 
-        for bitboard in self.color_bitboards[self.side as usize].iter_positions() {
-            for board_move in self.get_square_pseudo_legal_moves(bitboard) {
+        let pin_data = self.get_pinner_bitboards(self.side);
+
+        for square in self.color_bitboards[self.side as usize].iter_positions() {
+            // Get pin mask for this square if it's pinned
+            let pin_mask = pin_data.get_pin_mask_for_square(square);
+
+            for board_move in self.get_square_pseudo_legal_moves(square, pin_mask) {
                 self.make_move(board_move);
 
                 let king_position = self
