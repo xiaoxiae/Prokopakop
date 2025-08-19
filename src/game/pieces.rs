@@ -67,6 +67,14 @@ impl Piece {
             Piece::King => '♚',
         }
     }
+
+    pub fn is_slider(&self) -> bool {
+        // We change the color via Ansi codes
+        match self {
+            Piece::Bishop | Piece::Rook | Piece::Queen => true,
+            _ => false,
+        }
+    }
 }
 
 // TODO: this should be a named tuple

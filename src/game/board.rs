@@ -819,6 +819,9 @@ impl Game {
             .next_index()
     }
 
+    ///
+    /// Return a bitboard of attackers for a particular position.
+    ///
     fn get_attacked_from(&self, square: BoardSquare, color: Color) -> Bitboard {
         Piece::iter().fold(Bitboard::default(), |current, piece| {
             current
@@ -948,7 +951,8 @@ impl Game {
         let mut resulting_positions = [BoardMove::default(); MAX_VALID_MOVES];
         let mut count = 0;
 
-        let king_attacks = self.get_attacked_from(self.get_king_position(self.side), !self.side);
+        let king_position = self.get_king_position(self.side);
+        let king_attacks = self.get_attacked_from(king_position, !self.side);
 
         // TODO: we need check data here as well
         //   it should work essentially the same as is_square_attacked, just run through it all
@@ -970,9 +974,9 @@ impl Game {
 
                     self.make_move(board_move);
 
-                    let king_position = self.get_king_position(!self.side);
+                    let king_position_after_move = self.get_king_position(!self.side);
 
-                    if !self.is_square_attacked(king_position, self.side) {
+                    if !self.is_square_attacked(king_position_after_move, self.side) {
                         resulting_positions[count] = board_move;
                         count += 1;
                     }
@@ -990,9 +994,9 @@ impl Game {
                 for board_move in self.get_square_pseudo_legal_moves(square, pin_mask) {
                     self.make_move(board_move);
 
-                    let king_position = self.get_king_position(!self.side);
+                    let king_position_after_move = self.get_king_position(!self.side);
 
-                    if !self.is_square_attacked(king_position, self.side) {
+                    if !self.is_square_attacked(king_position_after_move, self.side) {
                         resulting_positions[count] = board_move;
                         count += 1;
                     }
@@ -1002,21 +1006,28 @@ impl Game {
             }
         } else {
             // can only evade if we have multiple attacks
-            for square in (self.color_bitboards[self.side as usize]
-                & self.piece_bitboards[Piece::King as usize])
-                .iter_positions()
-            {
-                for board_move in self.get_square_pseudo_legal_moves(square, None) {
-                    self.make_move(board_move);
 
-                    let king_position = self.get_king_position(!self.side);
+            // we need to collect bitboards of attacking sliders, as king could otherwise
+            // move "away" from them, which is technically a safe square
+            let mut slider_attack_bitboard = Bitboard::default();
 
-                    if !self.is_square_attacked(king_position, self.side) {
-                        resulting_positions[count] = board_move;
-                        count += 1;
-                    }
+            for position in king_attacks.iter_positions() {
+                let (piece, color) = self.pieces[position as usize].unwrap();
 
-                    self.unmake_move();
+                if piece.is_slider() {
+                    slider_attack_bitboard |= self.get_occlusion_bitmap(
+                        position,
+                        piece,
+                        Some(self.all_pieces_bitboard() & !king_position.to_mask()),
+                    )
+                }
+            }
+
+            // now we can only move to spots that are not attacked by the sliders
+            for board_move in self.get_square_pseudo_legal_moves(king_position, Some(!slider_attack_bitboard)) {
+                if !self.is_square_attacked(board_move.get_to(), !self.side) {
+                    resulting_positions[count] = board_move;
+                    count += 1;
                 }
             }
         }
