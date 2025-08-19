@@ -668,14 +668,15 @@ impl Game {
             let result = match color {
                 // the & with the random number prevents 'loop around' attacks
                 // where the pawn attacks on the other side of the board
-                // TODO: crashes for debug builds because of << shifts out
                 Color::White => {
-                    ((1 << square.wrapping_add(9)) & !0x0101010101010101)
-                        | ((1 << square.wrapping_add(7)) & !(0x0101010101010101 << 7))
+                    ((1u64.wrapping_shl(square.wrapping_add(9) as u32)) & !0x0101010101010101)
+                        | ((1u64.wrapping_shl(square.wrapping_add(7) as u32))
+                            & !(0x0101010101010101 << 7))
                 }
                 Color::Black => {
-                    ((1 << square.wrapping_sub(9)) & !(0x0101010101010101 << 7))
-                        | ((1 << square.wrapping_sub(7)) & !0x0101010101010101)
+                    ((1u64.wrapping_shl(square.wrapping_sub(9) as u32))
+                        & !(0x0101010101010101 << 7))
+                        | ((1u64.wrapping_shl(square.wrapping_sub(7) as u32)) & !0x0101010101010101)
                 }
             };
 
