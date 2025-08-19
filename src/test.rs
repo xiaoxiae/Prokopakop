@@ -1,10 +1,9 @@
-use rayon::iter::ParallelIterator;
 use crate::GameController;
+use rayon::iter::IntoParallelRefIterator;
+use rayon::iter::ParallelIterator;
 use std::collections::HashMap;
 use std::fs;
-use std::sync::Mutex;
 use std::time::Instant;
-use rayon::iter::IntoParallelRefIterator;
 
 #[test]
 fn test_zobrist_key_consistency() {
@@ -303,7 +302,7 @@ fn test_perft_positions_hard() {
 
 #[test]
 fn test_perft_positions_extreme() {
-    test_perft_positions_from_file("data/large.txt", 1, 4);
+    test_perft_positions_from_file("data/large.txt", 1, 5);
 }
 
 fn test_perft_positions_from_file(file_path: &str, min_depth: usize, max_depth: usize) {
@@ -330,7 +329,7 @@ fn test_perft_positions_from_file(file_path: &str, min_depth: usize, max_depth: 
     println!("Running {} test cases in parallel...", test_cases.len());
 
     // Run all test cases in parallel and panic on first failure
-    test_cases.par_iter().for_each(|(fen, depth, expected_count)| {
+    let results = test_cases.par_iter().map(|(fen, depth, expected_count)| {
         let mut controller = GameController::new();
         controller.new_game_from_fen(fen);
 
@@ -341,17 +340,29 @@ fn test_perft_positions_from_file(file_path: &str, min_depth: usize, max_depth: 
         let total_nodes: usize = moves.iter().map(|(_, count)| count).sum();
 
         if total_nodes != *expected_count {
-            panic!(
+            eprintln!(
                 "PERFT FAILURE: Position '{}' at depth {}: got {} nodes, expected {}",
                 fen, depth, total_nodes, expected_count
             );
+            return false;
         }
-    });
 
-    println!("All {} test cases passed!", test_cases.len());
+        true
+    }).collect::<Vec<bool>>();
+
+    let passed = results.iter().filter(|v| **v).count();
+
+    println!("{} tests passed.", passed);
+
+    if test_cases.len() != passed {
+        panic!("{} tests failed!", test_cases.len() - passed);
+    }
+
 }
 
-fn load_perft_positions(file_path: &str) -> Result<Vec<(String, Vec<usize>)>, Box<dyn std::error::Error>> {
+fn load_perft_positions(
+    file_path: &str,
+) -> Result<Vec<(String, Vec<usize>)>, Box<dyn std::error::Error>> {
     let content = fs::read_to_string(file_path)?;
     let mut positions = Vec::new();
 
@@ -374,7 +385,9 @@ fn load_perft_positions(file_path: &str) -> Result<Vec<(String, Vec<usize>)>, Bo
 
         match counts {
             Ok(counts) => positions.push((fen, counts)),
-            Err(e) => return Err(format!("Failed to parse counts in line '{}': {}", line, e).into()),
+            Err(e) => {
+                return Err(format!("Failed to parse counts in line '{}': {}", line, e).into());
+            }
         }
     }
 
