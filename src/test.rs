@@ -1,6 +1,10 @@
+use rayon::iter::ParallelIterator;
 use crate::GameController;
 use std::collections::HashMap;
+use std::fs;
+use std::sync::Mutex;
 use std::time::Instant;
+use rayon::iter::IntoParallelRefIterator;
 
 #[test]
 fn test_zobrist_key_consistency() {
@@ -284,95 +288,95 @@ fn test_position() {
 
 #[test]
 fn test_perft_positions_easy() {
-    test_perft_positions_depth(0, 3);
+    test_perft_positions_from_file("data/small.txt", 1, 3);
+}
+
+#[test]
+fn test_perft_positions_medium() {
+    test_perft_positions_from_file("data/small.txt", 1, 4);
 }
 
 #[test]
 fn test_perft_positions_hard() {
-    test_perft_positions_depth(4, 5);
+    test_perft_positions_from_file("data/large.txt", 1, 3);
 }
 
-fn test_perft_positions_depth(min_depth: usize, max_depth: usize) {
-    let mut controller = GameController::new();
-    let mut failures: Vec<_> = Vec::new();
-    let mut total = 0;
+#[test]
+fn test_perft_positions_extreme() {
+    test_perft_positions_from_file("data/large.txt", 1, 4);
+}
 
-    // Yoinked from https://www.chessprogramming.org/Perft_Results
-    let test_positions = [
-        // Position 1: Starting position
-        (
-            "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
-            vec![20, 400, 8902, 197281, 4865609, 119060324],
-        ),
-        // Position 2: Kiwipete
-        (
-            "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq -",
-            vec![48, 2039, 97862, 4085603, 193690690, 8031647685],
-        ),
-        // Position 3: Position with en passant and castling
-        (
-            "8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - -",
-            vec![14, 191, 2812, 43238, 674624, 11030083],
-        ),
-        // Position 4: Complex position with promotions
-        (
-            "r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq -",
-            vec![6, 264, 9467, 422333, 15833292, 706045033],
-        ),
-        // Position 5: Another complex position
-        (
-            "rnbq1k1r/pp1Pbppp/2p5/8/2B5/8/PPP1NnPP/RNBQK2R w KQ - 1 8",
-            vec![44, 1486, 62379, 2103487, 89941194],
-        ),
-        // Position 6: Balanced middle game position
-        (
-            "r4rk1/1pp1qppp/p1np1n2/2b1p1B1/2B1P1b1/P1NP1N2/1PP1QPPP/R4RK1 w - - 0 10",
-            vec![46, 2079, 89890, 3894594, 164075551, 6923051137],
-        ),
-    ];
+fn test_perft_positions_from_file(file_path: &str, min_depth: usize, max_depth: usize) {
+    // Read test positions from file
+    let test_positions = load_perft_positions(file_path)
+        .expect(&format!("Failed to load test positions from {}", file_path));
 
-    for (position_fen, depth_counts) in test_positions.iter() {
-        println!("Testing position: {}", position_fen);
-        controller.new_game_from_fen(position_fen);
+    // Create all test cases as a flat vector for parallel execution
+    let test_cases: Vec<_> = test_positions
+        .iter()
+        .flat_map(|(fen, depth_counts)| {
+            depth_counts
+                .iter()
+                .enumerate()
+                .map(|(depth_idx, expected_count)| {
+                    let depth = depth_idx + 1; // Convert from 0-based index to 1-based depth
+                    (fen.clone(), depth, *expected_count)
+                })
+                .filter(|(_, depth, _)| min_depth <= *depth && *depth <= max_depth)
+                .collect::<Vec<_>>()
+        })
+        .collect();
 
-        for (depth, expected_count) in depth_counts.iter().enumerate() {
-            let depth = depth + 1; // Convert from 0-based index to 1-based depth
+    println!("Running {} test cases in parallel...", test_cases.len());
 
-            if !(min_depth <= depth && depth <= max_depth) {
-                continue;
-            }
+    // Run all test cases in parallel and panic on first failure
+    test_cases.par_iter().for_each(|(fen, depth, expected_count)| {
+        let mut controller = GameController::new();
+        controller.new_game_from_fen(fen);
 
-            let start_time = Instant::now();
-            let moves = controller.perft(depth);
-            let elapsed = start_time.elapsed();
+        let start_time = Instant::now();
+        let moves = controller.perft(*depth);
+        let elapsed = start_time.elapsed();
 
-            let total_nodes: usize = moves.iter().map(|(_, count)| count).sum();
+        let total_nodes: usize = moves.iter().map(|(_, count)| count).sum();
 
-            println!(
-                "  Depth {}: {} nodes (expected: {}) - {:?}",
-                depth, total_nodes, expected_count, elapsed
+        if total_nodes != *expected_count {
+            panic!(
+                "PERFT FAILURE: Position '{}' at depth {}: got {} nodes, expected {}",
+                fen, depth, total_nodes, expected_count
             );
-
-            if total_nodes != *expected_count {
-                failures.push(format!(
-                    "Position '{}' at depth {}: got {} nodes, expected {}",
-                    position_fen, depth, total_nodes, expected_count
-                ));
-            }
-
-            total += 1;
         }
-        println!();
+    });
+
+    println!("All {} test cases passed!", test_cases.len());
+}
+
+fn load_perft_positions(file_path: &str) -> Result<Vec<(String, Vec<usize>)>, Box<dyn std::error::Error>> {
+    let content = fs::read_to_string(file_path)?;
+    let mut positions = Vec::new();
+
+    for line in content.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+
+        let parts: Vec<&str> = line.split(',').collect();
+        if parts.len() < 2 {
+            return Err(format!("Invalid line format: {}", line).into());
+        }
+
+        let fen = parts[0].to_string();
+        let counts: Result<Vec<usize>, _> = parts[1..]
+            .iter()
+            .map(|s| s.trim().parse::<usize>())
+            .collect();
+
+        match counts {
+            Ok(counts) => positions.push((fen, counts)),
+            Err(e) => return Err(format!("Failed to parse counts in line '{}': {}", line, e).into()),
+        }
     }
 
-    // Panic at the end with all failure information
-    if !failures.is_empty() {
-        let failure_summary = failures.join("\n  ");
-        panic!(
-            "Perft test failed with {}/{} error(s):\n  {}",
-            failures.len(),
-            total,
-            failure_summary
-        );
-    }
+    Ok(positions)
 }
