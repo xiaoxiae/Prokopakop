@@ -33,6 +33,10 @@ impl Not for Color {
 }
 
 impl Piece {
+    pub fn sliders() -> [Piece; 2] {
+        [Piece::Bishop, Piece::Rook]
+    }
+    
     pub fn from_char(c: char) -> Option<Piece> {
         match c {
             'p' => Some(Piece::Pawn),

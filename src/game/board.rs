@@ -358,7 +358,7 @@ impl Game {
         if self.en_passant_bitmap == 0 {
             fen.push('-');
         } else {
-            fen.push_str(&(self.en_passant_bitmap as BoardSquare).unparse());
+            fen.push_str(&self.en_passant_bitmap.next_index().unparse());
         }
 
         // Halfmove clock
@@ -643,14 +643,16 @@ impl Game {
                     _ => unreachable!(),
                 };
 
-                let key =
-                    possible_blocker_positions_bitboard & blockers.unwrap_or(self.all_pieces_bitboard());
+                let key = possible_blocker_positions_bitboard
+                    & blockers.unwrap_or(self.all_pieces_bitboard());
 
                 // then, given the magic table information...
-                let (magic_number, table_offset, bit_offset) = MAGIC_TABLE[offset + square as usize];
+                let (magic_number, table_offset, bit_offset) =
+                    MAGIC_TABLE[offset + square as usize];
 
                 // ... obtain calculate the blocker bitboard
-                MAGIC_ENTRIES[table_offset + (magic_number.wrapping_mul(key) >> bit_offset) as usize]
+                MAGIC_ENTRIES
+                    [table_offset + (magic_number.wrapping_mul(key) >> bit_offset) as usize]
             }
             _ => unreachable!(),
         }
@@ -848,12 +850,12 @@ impl Game {
     pub fn get_square_pseudo_legal_moves(
         &self,
         square: BoardSquare,
-        pin_mask: Option<Bitboard>,
+        valid_move_mask: Option<Bitboard>,
     ) -> ValidMovesIterator {
         let mut bitboard = self.get_pseudo_legal_move_bitboard(square);
 
         // Apply pin mask if provided
-        if let Some(mask) = pin_mask {
+        if let Some(mask) = valid_move_mask {
             bitboard &= mask;
         }
 
@@ -889,7 +891,7 @@ impl Game {
         //   |    |    |    |
         //  Kng  (1)  (2)   |
         //
-        for piece in [Piece::Bishop, Piece::Rook] {
+        for piece in Piece::sliders() {
             let piece_idx = piece as usize;
 
             // (1) get occlusions to get possible pinned pieces
@@ -945,6 +947,73 @@ impl Game {
     }
 
     ///
+    /// Retrieve attack information when the king is under exactly one attack.
+    /// Returns the attack bitmap (ray from attacker to king) for blocking moves,
+    /// plus the attacker position for capture moves.
+    ///
+    pub fn get_single_slider_attack_data(&self, position: BoardSquare, color: Color) -> Bitboard {
+        // Check all slider pieces that could be attacking the king
+        for piece in Piece::sliders() {
+            // (1) Raycast from king to find potential attackers
+            let raycast_from_king = self.get_occlusion_bitmap(position, piece, None);
+
+            // Find enemy sliders (including queens) that could attack along this ray
+            let potential_attackers = (self.colored_piece_bitboard((piece, !color))
+                | self.colored_piece_bitboard((Piece::Queen, !color)))
+                & raycast_from_king;
+
+            // Check each potential attacker
+            for attacker_position in potential_attackers.iter_positions() {
+                // (2) Raycast back from attacker to king with current board state
+                let raycast_from_attacker = self.get_occlusion_bitmap(
+                    attacker_position,
+                    piece,
+                    Some(self.all_pieces_bitboard()),
+                );
+
+                // If the raycast from attacker reaches the king, we have a direct attack
+                return (raycast_from_attacker | (1 << attacker_position)) & !self.all_pieces_bitboard();
+            }
+        }
+
+        panic!("No slider attacks found for king");
+    }
+
+    fn add_evade_moves(
+        &self,
+        king_position: BoardSquare,
+        king_attacks: Bitboard,
+        resulting_positions: &mut [BoardMove],
+        count: &mut usize,
+    ) {
+        // we need to collect bitboards of attacking sliders, as king could otherwise
+        // move "away" from them, which is technically a safe square
+        let mut slider_attack_bitboard = Bitboard::default();
+
+        for position in king_attacks.iter_positions() {
+            let (piece, _) = self.pieces[position as usize].unwrap();
+
+            if piece.is_slider() {
+                slider_attack_bitboard |= self.get_occlusion_bitmap(
+                    position,
+                    piece,
+                    Some(self.all_pieces_bitboard() & !king_position.to_mask()),
+                )
+            }
+        }
+
+        // now we can only move to spots that are not attacked by the sliders
+        for board_move in
+            self.get_square_pseudo_legal_moves(king_position, Some(!slider_attack_bitboard))
+        {
+            if !self.is_square_attacked(board_move.get_to(), !self.side) {
+                resulting_positions[*count] = board_move;
+                *count += 1;
+            }
+        }
+    }
+
+    ///
     /// Obtain a list of valid moves for the current position.
     ///
     pub fn get_moves(&mut self) -> ([BoardMove; MAX_VALID_MOVES], usize) {
@@ -960,8 +1029,8 @@ impl Game {
         //   if we only have one attack, then we can either move the king, or move pieces to block the attack
         //   if we have multiple, we MUST move the king
 
-        // king is not under attack
         if king_attacks.count_ones() == 0 {
+            // king is not under attack
             let pin_data = self.get_pinner_bitboards(self.side);
 
             for square in self.color_bitboards[self.side as usize].iter_positions() {
@@ -969,9 +1038,6 @@ impl Game {
                 let pin_mask = pin_data.get_pin_mask_for_square(square);
 
                 for board_move in self.get_square_pseudo_legal_moves(square, pin_mask) {
-                    self.get_pseudo_legal_move_bitboard(square)
-                        .print(None, None);
-
                     self.make_move(board_move);
 
                     let king_position_after_move = self.get_king_position(!self.side);
@@ -985,51 +1051,88 @@ impl Game {
                 }
             }
         } else if king_attacks.count_ones() == 1 {
+            // king is under one attack -- he can
+            //  - block with an unpinned piece / take the attacker
+            //  - evade
             let pin_data = self.get_pinner_bitboards(self.side);
 
-            for square in self.color_bitboards[self.side as usize].iter_positions() {
+            let attacking_position = king_attacks.next_index();
+            let (attacking_piece, _) = self.pieces[attacking_position as usize].unwrap();
+
+            // go through all non-king pieces
+            for square in (self.color_bitboards[self.side as usize] & !king_position.to_mask())
+                .iter_positions()
+            {
                 // Get pin mask for this square if it's pinned
                 let pin_mask = pin_data.get_pin_mask_for_square(square);
 
-                for board_move in self.get_square_pseudo_legal_moves(square, pin_mask) {
-                    self.make_move(board_move);
+                if !attacking_piece.is_slider() {
+                    let (moving_piece, moving_color) = self.pieces[square as usize].unwrap();
 
-                    let king_position_after_move = self.get_king_position(!self.side);
+                    // There is a special bullshit case where a pawn attacks a king and we can take it via en-passant
+                    if attacking_piece == Piece::Pawn
+                        && moving_piece == Piece::Pawn
+                        && (self.en_passant_bitmap
+                            & self.get_piece_attack_bitboard(square, (moving_piece, moving_color)))
+                            & pin_mask.unwrap_or(!0)
+                            != 0
+                    {
+                        resulting_positions[count] =
+                            BoardMove::new(square, self.en_passant_bitmap.next_index(), None);
+                        count += 1;
+                        continue;
+                    }
 
-                    if !self.is_square_attacked(king_position_after_move, self.side) {
+                    // If it's not a slider, all we can do is take it, so combine pins with its square
+                    for board_move in self.get_square_pseudo_legal_moves(
+                        square,
+                        Some(attacking_position.to_mask() & pin_mask.unwrap_or(!0)),
+                    ) {
                         resulting_positions[count] = board_move;
                         count += 1;
                     }
+                } else {
+                    // TODO: work in progress
+                    // // If it is a slider, we can either take, or block
+                    // let attack_data = self.get_single_slider_attack_data(king_position, self.side);
 
-                    self.unmake_move();
+                    // for board_move in self.get_square_pseudo_legal_moves(
+                    //     square,
+                    //     Some(attack_data & pin_mask.unwrap_or(!0)),
+                    // ) {
+                    //     resulting_positions[count] = board_move;
+                    //     count += 1;
+                    // }
+
+                    for board_move in self.get_square_pseudo_legal_moves(square, pin_mask) {
+                        self.make_move(board_move);
+
+                        let king_position_after_move = self.get_king_position(!self.side);
+
+                        if !self.is_square_attacked(king_position_after_move, self.side) {
+                            resulting_positions[count] = board_move;
+                            count += 1;
+                        }
+
+                        self.unmake_move();
+                    }
                 }
             }
+
+            self.add_evade_moves(
+                king_position,
+                king_attacks,
+                &mut resulting_positions,
+                &mut count,
+            );
         } else {
             // can only evade if we have multiple attacks
-
-            // we need to collect bitboards of attacking sliders, as king could otherwise
-            // move "away" from them, which is technically a safe square
-            let mut slider_attack_bitboard = Bitboard::default();
-
-            for position in king_attacks.iter_positions() {
-                let (piece, color) = self.pieces[position as usize].unwrap();
-
-                if piece.is_slider() {
-                    slider_attack_bitboard |= self.get_occlusion_bitmap(
-                        position,
-                        piece,
-                        Some(self.all_pieces_bitboard() & !king_position.to_mask()),
-                    )
-                }
-            }
-
-            // now we can only move to spots that are not attacked by the sliders
-            for board_move in self.get_square_pseudo_legal_moves(king_position, Some(!slider_attack_bitboard)) {
-                if !self.is_square_attacked(board_move.get_to(), !self.side) {
-                    resulting_positions[count] = board_move;
-                    count += 1;
-                }
-            }
+            self.add_evade_moves(
+                king_position,
+                king_attacks,
+                &mut resulting_positions,
+                &mut count,
+            );
         }
 
         (resulting_positions, count)
