@@ -120,7 +120,9 @@ impl GameController {
     }
 
     pub fn try_move_piece(&mut self, long_algebraic_notation: String) -> MoveResultType {
-        match BoardMove::parse(long_algebraic_notation.as_str()) {
+        match BoardMove::parse(long_algebraic_notation.as_str())
+            .or(long_algebraic_notation.parse::<BoardMove>().ok())
+        {
             Some(board_move) => {
                 let (valid_moves, _) = self.game.get_moves();
 
