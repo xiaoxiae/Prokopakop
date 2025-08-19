@@ -628,21 +628,32 @@ impl Game {
         piece: Piece,
         blockers: Option<Bitboard>,
     ) -> Bitboard {
-        // first calculate the key
-        let (possible_blocker_positions_bitboard, offset) = match piece {
-            Piece::Rook => (MAGIC_ROOK_BLOCKER_BITBOARD[square as usize], 0),
-            Piece::Bishop => (MAGIC_BISHOP_BLOCKER_BITBOARD[square as usize], 64),
+        match piece {
+            Piece::Queen => {
+                // Queen moves like both rook and bishop, so combine their attack patterns
+                let rook_attacks = self.get_occlusion_bitmap(square, Piece::Rook, blockers);
+                let bishop_attacks = self.get_occlusion_bitmap(square, Piece::Bishop, blockers);
+                rook_attacks | bishop_attacks
+            }
+            Piece::Rook | Piece::Bishop => {
+                // Original logic for rook and bishop
+                let (possible_blocker_positions_bitboard, offset) = match piece {
+                    Piece::Rook => (MAGIC_ROOK_BLOCKER_BITBOARD[square as usize], 0),
+                    Piece::Bishop => (MAGIC_BISHOP_BLOCKER_BITBOARD[square as usize], 64),
+                    _ => unreachable!(),
+                };
+
+                let key =
+                    possible_blocker_positions_bitboard & blockers.unwrap_or(self.all_pieces_bitboard());
+
+                // then, given the magic table information...
+                let (magic_number, table_offset, bit_offset) = MAGIC_TABLE[offset + square as usize];
+
+                // ... obtain calculate the blocker bitboard
+                MAGIC_ENTRIES[table_offset + (magic_number.wrapping_mul(key) >> bit_offset) as usize]
+            }
             _ => unreachable!(),
-        };
-
-        let key =
-            possible_blocker_positions_bitboard & blockers.unwrap_or(self.all_pieces_bitboard());
-
-        // then, given the magic table information...
-        let (magic_number, table_offset, bit_offset) = MAGIC_TABLE[offset + square as usize];
-
-        // ... obtain calculate the blocker bitboard
-        MAGIC_ENTRIES[table_offset + (magic_number.wrapping_mul(key) >> bit_offset) as usize]
+        }
     }
 
     ///
@@ -676,12 +687,8 @@ impl Game {
 
         match piece {
             // Slider stuff using magic bitmaps
-            Piece::Bishop | Piece::Rook => {
+            Piece::Bishop | Piece::Rook | Piece::Queen => {
                 valid_moves &= self.get_occlusion_bitmap(square, piece, None);
-            }
-            Piece::Queen => {
-                valid_moves &= self.get_occlusion_bitmap(square, Piece::Rook, None)
-                    | self.get_occlusion_bitmap(square, Piece::Bishop, None);
             }
             _ => {}
         }
