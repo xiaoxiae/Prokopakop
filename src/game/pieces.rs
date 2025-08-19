@@ -7,8 +7,8 @@ pub enum Piece {
     // Promoting pieces
     Rook = 0,
     Bishop = 1,
-    Knight = 2,
-    Queen = 3,
+    Queen = 2,
+    Knight = 3,
 
     // Non-promoting pieces
     Pawn = 4,

@@ -334,17 +334,17 @@ impl Game {
         // Castling
         fen.push(' ');
         let mut castling = String::new();
-        if self.castling_flags & 0b00000100 != 0 {
-            castling.push('K');
-        }
-        if self.castling_flags & 0b00001000 != 0 {
-            castling.push('Q');
-        }
         if self.castling_flags & 0b00000001 != 0 {
             castling.push('k');
         }
         if self.castling_flags & 0b00000010 != 0 {
             castling.push('q');
+        }
+        if self.castling_flags & 0b00000100 != 0 {
+            castling.push('K');
+        }
+        if self.castling_flags & 0b00001000 != 0 {
+            castling.push('Q');
         }
 
         if castling.is_empty() {
@@ -536,10 +536,10 @@ impl Game {
             if let Some((Piece::Rook, c)) = captured_piece {
                 let castling_flags = self.castling_flags
                     & !match (c, board_move.get_to()) {
-                        (Color::Black, BoardSquare::A8) => 1,
-                        (Color::Black, BoardSquare::H8) => 2,
-                        (Color::White, BoardSquare::A1) => 4,
-                        (Color::White, BoardSquare::H1) => 8,
+                        (Color::Black, BoardSquare::H8) => 0b00000001,
+                        (Color::Black, BoardSquare::A8) => 0b00000010,
+                        (Color::White, BoardSquare::H1) => 0b00000100,
+                        (Color::White, BoardSquare::A1) => 0b00001000,
                         _ => 0,
                     };
 
@@ -584,10 +584,10 @@ impl Game {
         if piece == Piece::Rook && !promoted {
             let castling_flags = self.castling_flags
                 & !match (color, board_move.get_from()) {
-                    (Color::Black, BoardSquare::A8) => 1,
-                    (Color::Black, BoardSquare::H8) => 2,
-                    (Color::White, BoardSquare::A1) => 4,
-                    (Color::White, BoardSquare::H1) => 8,
+                    (Color::Black, BoardSquare::H8) => 0b00000001,
+                    (Color::Black, BoardSquare::A8) => 0b00000010,
+                    (Color::White, BoardSquare::H1) => 0b00000100,
+                    (Color::White, BoardSquare::A1) => 0b00001000,
                     _ => 0,
                 };
 
@@ -696,10 +696,10 @@ impl Game {
     fn can_castle(&self, piece: Piece, color: Color) -> bool {
         // return false immediately if we can't castle because of castling flags
         if match (piece, color) {
-            (Piece::Queen, Color::Black) => 0b0001,
-            (Piece::King, Color::Black) => 0b0010,
-            (Piece::Queen, Color::White) => 0b0100,
-            (Piece::King, Color::White) => 0b1000,
+            (Piece::King, Color::Black) => 0b0001,
+            (Piece::Queen, Color::Black) => 0b0010,
+            (Piece::King, Color::White) => 0b0100,
+            (Piece::Queen, Color::White) => 0b1000,
             _ => unreachable!(),
         } & self.castling_flags
             == 0
@@ -806,6 +806,19 @@ impl Game {
         valid_moves
     }
 
+    fn get_king_position(&self, color: Color) -> BoardSquare {
+        self.colored_piece_bitboard((Piece::King, color))
+            .next_index()
+    }
+
+    fn get_attacked_from(&self, square: BoardSquare, color: Color) -> Bitboard {
+        Piece::iter().fold(Bitboard::default(), |current, piece| {
+            current
+                | (self.get_piece_attack_bitboard(square, (piece, !color))
+                    & self.colored_piece_bitboard((piece, color)))
+        })
+    }
+
     ///
     /// Check for the attack on a square by a particular color.
     ///
@@ -853,9 +866,7 @@ impl Game {
     /// Returns structured data with pinned pieces and their valid move squares.
     ///
     pub fn get_pinner_bitboards(&self, color: Color) -> PinData {
-        let king_position = self
-            .colored_piece_bitboard((Piece::King, color))
-            .next_index();
+        let king_position = self.get_king_position(color);
 
         let mut pin_data = PinData::default();
 
@@ -929,25 +940,76 @@ impl Game {
         let mut resulting_positions = [BoardMove::default(); MAX_VALID_MOVES];
         let mut count = 0;
 
-        let pin_data = self.get_pinner_bitboards(self.side);
+        let king_attacks = self.get_attacked_from(self.get_king_position(self.side), !self.side);
 
-        for square in self.color_bitboards[self.side as usize].iter_positions() {
-            // Get pin mask for this square if it's pinned
-            let pin_mask = pin_data.get_pin_mask_for_square(square);
+        // TODO: we need check data here as well
+        //   it should work essentially the same as is_square_attacked, just run through it all
+        //   and combine into a single bitmap
+        //   if we only have one attack, then we can either move the king, or move pieces to block the attack
+        //   if we have multiple, we MUST move the king
 
-            for board_move in self.get_square_pseudo_legal_moves(square, pin_mask) {
-                self.make_move(board_move);
+        // king is not under attack
+        if king_attacks.count_ones() == 0 {
+            let pin_data = self.get_pinner_bitboards(self.side);
 
-                let king_position = self
-                    .colored_piece_bitboard((Piece::King, !self.side))
-                    .next_index();
+            for square in self.color_bitboards[self.side as usize].iter_positions() {
+                // Get pin mask for this square if it's pinned
+                let pin_mask = pin_data.get_pin_mask_for_square(square);
 
-                if !self.is_square_attacked(king_position, self.side) {
-                    resulting_positions[count] = board_move;
-                    count += 1;
+                for board_move in self.get_square_pseudo_legal_moves(square, pin_mask) {
+                    self.get_pseudo_legal_move_bitboard(square)
+                        .print(None, None);
+
+                    self.make_move(board_move);
+
+                    let king_position = self.get_king_position(!self.side);
+
+                    if !self.is_square_attacked(king_position, self.side) {
+                        resulting_positions[count] = board_move;
+                        count += 1;
+                    }
+
+                    self.unmake_move();
                 }
+            }
+        } else if king_attacks.count_ones() == 1 {
+            let pin_data = self.get_pinner_bitboards(self.side);
 
-                self.unmake_move();
+            for square in self.color_bitboards[self.side as usize].iter_positions() {
+                // Get pin mask for this square if it's pinned
+                let pin_mask = pin_data.get_pin_mask_for_square(square);
+
+                for board_move in self.get_square_pseudo_legal_moves(square, pin_mask) {
+                    self.make_move(board_move);
+
+                    let king_position = self.get_king_position(!self.side);
+
+                    if !self.is_square_attacked(king_position, self.side) {
+                        resulting_positions[count] = board_move;
+                        count += 1;
+                    }
+
+                    self.unmake_move();
+                }
+            }
+        } else {
+            // can only evade if we have multiple attacks
+            for square in (self.color_bitboards[self.side as usize]
+                & self.piece_bitboards[Piece::King as usize])
+                .iter_positions()
+            {
+                for board_move in self.get_square_pseudo_legal_moves(square, None) {
+                    self.make_move(board_move);
+
+                    let king_position = self.get_king_position(!self.side);
+
+                    if !self.is_square_attacked(king_position, self.side) {
+                        resulting_positions[count] = board_move;
+                        count += 1;
+                    }
+
+                    self.unmake_move();
+                }
             }
         }
 
