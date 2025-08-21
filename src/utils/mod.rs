@@ -3,6 +3,6 @@ pub mod cli;
 pub mod magic;
 pub mod zobris;
 
-pub use bitboard::*;
-pub use cli::*;
-pub use magic::*;
+pub(crate) use bitboard::*;
+pub(crate) use cli::*;
+pub(crate) use magic::*;

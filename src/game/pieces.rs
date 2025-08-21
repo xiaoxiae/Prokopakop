@@ -33,10 +33,6 @@ impl Not for Color {
 }
 
 impl Piece {
-    pub fn sliders() -> [Piece; 2] {
-        [Piece::Bishop, Piece::Rook]
-    }
-    
     pub fn from_char(c: char) -> Option<Piece> {
         match c {
             'p' => Some(Piece::Pawn),
@@ -70,6 +66,10 @@ impl Piece {
             Piece::Queen => '♛',
             Piece::King => '♚',
         }
+    }
+
+    pub fn simple_sliders() -> [Piece; 2] {
+        [Piece::Bishop, Piece::Rook]
     }
 
     pub fn is_slider(&self) -> bool {

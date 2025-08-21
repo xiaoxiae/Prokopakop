@@ -4,7 +4,7 @@ mod test;
 mod utils;
 
 pub use crate::controller::*;
-use crate::game::{BoardMoveExt, MoveResultType, Piece};
+use crate::game::{BoardMoveExt, MoveResultType};
 pub use crate::utils::*;
 use clap::{Arg, Command};
 

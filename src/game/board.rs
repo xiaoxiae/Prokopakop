@@ -333,18 +333,20 @@ impl Game {
 
         // Castling
         fen.push(' ');
+
+        // DO NOT mess with this ordering, as FEN expects it this way
         let mut castling = String::new();
-        if self.castling_flags & 0b00000001 != 0 {
-            castling.push('k');
-        }
-        if self.castling_flags & 0b00000010 != 0 {
-            castling.push('q');
-        }
         if self.castling_flags & 0b00000100 != 0 {
             castling.push('K');
         }
         if self.castling_flags & 0b00001000 != 0 {
             castling.push('Q');
+        }
+        if self.castling_flags & 0b00000001 != 0 {
+            castling.push('k');
+        }
+        if self.castling_flags & 0b00000010 != 0 {
+            castling.push('q');
         }
 
         if castling.is_empty() {
@@ -703,6 +705,8 @@ impl Game {
     /// Return true/false whether we can kingside/queenside castle for the particular color.
     /// The piece is king/queen for kingside/queenside castling.
     ///
+    /// Note that this will return true when castling into a check, as these are checked later.
+    ///
     fn can_castle(&self, piece: Piece, color: Color) -> bool {
         // return false immediately if we can't castle because of castling flags
         if match (piece, color) {
@@ -731,24 +735,13 @@ impl Game {
             return false;
         }
 
-        // finally, if there are checks in the castling directions, we can't castle either
+        // since we're already doing destination checks for king moves,
+        // we don't need to check the final resulting position
         if match (piece, color) {
-            (Piece::Queen, Color::Black) => {
-                self.is_square_attacked(BoardSquare::C8, !color)
-                    || self.is_square_attacked(BoardSquare::D8, !color)
-            }
-            (Piece::King, Color::Black) => {
-                self.is_square_attacked(BoardSquare::F8, !color)
-                    || self.is_square_attacked(BoardSquare::G8, !color)
-            }
-            (Piece::Queen, Color::White) => {
-                self.is_square_attacked(BoardSquare::C1, !color)
-                    || self.is_square_attacked(BoardSquare::D1, !color)
-            }
-            (Piece::King, Color::White) => {
-                self.is_square_attacked(BoardSquare::F1, !color)
-                    || self.is_square_attacked(BoardSquare::G1, !color)
-            }
+            (Piece::Queen, Color::Black) => self.is_square_attacked(BoardSquare::D8, !color),
+            (Piece::King, Color::Black) => self.is_square_attacked(BoardSquare::F8, !color),
+            (Piece::Queen, Color::White) => self.is_square_attacked(BoardSquare::D1, !color),
+            (Piece::King, Color::White) => self.is_square_attacked(BoardSquare::F1, !color),
             _ => unreachable!(),
         } {
             return false;
@@ -763,10 +756,7 @@ impl Game {
     /// current turn (i.e. ignoring `this.side`).
     ///
     fn get_pseudo_legal_move_bitboard(&self, square: BoardSquare) -> Bitboard {
-        let colored_piece @ (piece, color) = match self.pieces[square as usize] {
-            Some(v) => v,
-            None => return 0,
-        };
+        let colored_piece @ (piece, color) = self.pieces[square as usize].unwrap();
 
         // Obtain attack move bitboard, which are also regular moves for all but pawns
         let mut valid_moves = self.get_piece_attack_bitboard(square, colored_piece);
@@ -891,7 +881,7 @@ impl Game {
         //   |    |    |    |
         //  Kng  (1)  (2)   |
         //
-        for piece in Piece::sliders() {
+        for piece in Piece::simple_sliders() {
             let piece_idx = piece as usize;
 
             // (1) get occlusions to get possible pinned pieces
@@ -953,7 +943,7 @@ impl Game {
     ///
     pub fn get_single_slider_attack_data(&self, position: BoardSquare, color: Color) -> Bitboard {
         // Check all slider pieces that could be attacking the king
-        for piece in Piece::sliders() {
+        for piece in Piece::simple_sliders() {
             // (1) Raycast from king to find potential attackers
             let raycast_from_king = self.get_occlusion_bitmap(position, piece, None);
 
