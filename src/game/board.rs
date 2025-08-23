@@ -231,47 +231,38 @@ macro_rules! dispatch_piece_color {
 }
 
 macro_rules! for_each_simple_slider {
-    // syntax: for_each_simple_slider!(|Type, PIECE| { ... })
-    (|$T:ident, $piece:ident| $body:block) => {{
+    (|$T:ident| $body:block) => {{
         {
             type $T = ConstRook;
-            const $piece: Piece = Piece::Rook;
             $body
         }
         {
             type $T = ConstBishop;
-            const $piece: Piece = Piece::Bishop;
             $body
         }
     }};
 }
 
-macro_rules! for_each_const_piece {
-    // syntax: for_each_const_piece!(|Type, PIECE| { ... })
-    (|$T:ident, $piece:ident| $body:block) => {{
+macro_rules! for_each_non_king_const_piece {
+    (|$T:ident| $body:block) => {{
         {
             type $T = ConstPawn;
-            const $piece: Piece = Piece::Pawn;
             $body
         }
         {
             type $T = ConstKnight;
-            const $piece: Piece = Piece::Knight;
             $body
         }
         {
             type $T = ConstBishop;
-            const $piece: Piece = Piece::Bishop;
             $body
         }
         {
             type $T = ConstRook;
-            const $piece: Piece = Piece::Rook;
             $body
         }
         {
             type $T = ConstQueen;
-            const $piece: Piece = Piece::Queen;
             $body
         }
     }};
@@ -992,7 +983,7 @@ impl Game {
         //   |    |    |    |
         //  Kng  (1)  (2)   |
         //
-        for_each_simple_slider!(|P, piece| {
+        for_each_simple_slider!(|P| {
             // (1) get occlusions to get possible pinned pieces
             let raycast_1 = self.get_occlusion_bitmap_const::<P>(king_position, self.all_pieces);
 
@@ -1048,7 +1039,7 @@ impl Game {
         position: BoardSquare,
     ) -> Bitboard {
         // Check all slider pieces that could be attacking the king
-        for_each_simple_slider!(|P, piece| {
+        for_each_simple_slider!(|P| {
             // (1) Raycast from king to find potential attackers
             let raycast_from_king = self.get_occlusion_bitmap_const::<P>(position, self.all_pieces);
 
@@ -1274,7 +1265,7 @@ impl Game {
         }
     }
 
-    fn process_one_attack_moves_const<P: ConstPiece, P_ATTACK: ConstPiece, C: ConstColor>(
+    fn process_one_attack_moves_const<P: ConstPiece, PA: ConstPiece, C: ConstColor>(
         &self,
         pin_data: &PinData,
         king_position: BoardSquare,
@@ -1289,12 +1280,12 @@ impl Game {
             // Get pin mask for this square if it's pinned
             let pin_mask = pin_data.get_pin_mask_for_square(square);
 
-            let mut bitboard = Bitboard::default();
+            let bitboard;
 
-            if !P_ATTACK::IS_SLIDER {
+            if !PA::IS_SLIDER {
                 // There is a special bullshit case where a pawn attacks a king and we can take it via en-passant
                 if P::PIECE == Piece::Pawn
-                    && P_ATTACK::PIECE == Piece::Pawn
+                    && PA::PIECE == Piece::Pawn
                     && (self.en_passant_bitmap
                         & self.get_piece_attack_bitboard_const::<ConstPawn, C>(square))
                         & pin_mask
@@ -1347,7 +1338,7 @@ impl Game {
             // king is not under attack, so just move regularly, but not into a pin
             let pin_data = self.get_pinner_bitboards_const::<C>();
 
-            for_each_const_piece!(|P, piece| {
+            for_each_non_king_const_piece!(|P| {
                 self.process_zero_attack_moves_const::<P, C>(
                     &pin_data,
                     king_position,
@@ -1375,7 +1366,7 @@ impl Game {
 
             match attacking_piece {
                 Piece::Pawn => {
-                    for_each_const_piece!(|P, piece| {
+                    for_each_non_king_const_piece!(|P| {
                         self.process_one_attack_moves_const::<P, ConstPawn, C>(
                             &pin_data,
                             king_position,
@@ -1386,7 +1377,7 @@ impl Game {
                     });
                 }
                 Piece::Knight => {
-                    for_each_const_piece!(|P, piece| {
+                    for_each_non_king_const_piece!(|P| {
                         self.process_one_attack_moves_const::<P, ConstKnight, C>(
                             &pin_data,
                             king_position,
@@ -1397,7 +1388,7 @@ impl Game {
                     });
                 }
                 Piece::Bishop => {
-                    for_each_const_piece!(|P, piece| {
+                    for_each_non_king_const_piece!(|P| {
                         self.process_one_attack_moves_const::<P, ConstBishop, C>(
                             &pin_data,
                             king_position,
@@ -1408,7 +1399,7 @@ impl Game {
                     });
                 }
                 Piece::Rook => {
-                    for_each_const_piece!(|P, piece| {
+                    for_each_non_king_const_piece!(|P| {
                         self.process_one_attack_moves_const::<P, ConstRook, C>(
                             &pin_data,
                             king_position,
@@ -1419,7 +1410,7 @@ impl Game {
                     });
                 }
                 Piece::Queen => {
-                    for_each_const_piece!(|P, piece| {
+                    for_each_non_king_const_piece!(|P| {
                         self.process_one_attack_moves_const::<P, ConstQueen, C>(
                             &pin_data,
                             king_position,

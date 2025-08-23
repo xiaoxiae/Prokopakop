@@ -3,6 +3,7 @@ mod game;
 mod test;
 mod utils;
 
+pub use crate::cli::*;
 pub use crate::controller::*;
 use crate::game::{BoardMoveExt, MoveResultType};
 pub use crate::utils::*;
@@ -73,7 +74,7 @@ fn main() {
 
     // Interactive mode
     loop {
-        let input = receive();
+        let input = GUICommand::receive();
 
         // Common commands
         match (&input, controller.mode.is_some()) {
@@ -94,10 +95,7 @@ fn main() {
         match controller.mode {
             // UCI-only commands
             Some(ControllerMode::UCI) => match input {
-                Some(GUICommand::IsReady) => respond(BotCommand::ReadyOk),
-                Some(GUICommand::SetOption(name, value)) => {
-                    controller.set_option(&name, &value);
-                }
+                Some(GUICommand::IsReady) => GUICommand::respond(BotCommand::ReadyOk),
                 Some(GUICommand::ValidMoves(depth_string)) => {
                     let moves = controller
                         .perft(depth_string.parse::<usize>().unwrap(), controller.use_hash);
@@ -106,11 +104,6 @@ fn main() {
                     for (m, c) in &moves {
                         println!("{}: {}", m.unparse(), c);
                         total += c;
-                    }
-
-                    if controller.use_hash {
-                        // Note: We can't access table size here since it's local to perft
-                        // Could be improved by returning table size from perft if needed
                     }
 
                     println!("\nNodes: {}", total);
@@ -175,17 +168,13 @@ fn main() {
                     let name = "Prokopakop";
                     let author = "Tomíno Komíno";
 
-                    respond(BotCommand::Identify(name.to_string(), author.to_string()));
-
-                    // Announce available options
-                    println!("option name Hash type check default true");
-
-                    respond(BotCommand::UCIOk);
+                    GUICommand::respond(BotCommand::Identify(name.to_string(), author.to_string()));
+                    GUICommand::respond(BotCommand::UCIOk);
 
                     controller.initialize(ControllerMode::UCI)
                 }
                 Some(GUICommand::Play) => {
-                    respond(BotCommand::PlayOk);
+                    GUICommand::respond(BotCommand::PlayOk);
 
                     controller.initialize(ControllerMode::Play);
                     controller.print()
