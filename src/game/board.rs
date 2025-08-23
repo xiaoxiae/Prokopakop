@@ -170,6 +170,8 @@ impl ConstColor for ConstBlack {
 pub trait ConstPiece {
     const PIECE: Piece;
     const PIECE_INDEX: usize;
+
+    // TODO: remove these since they're duplicate
     const IS_SLIDER: bool;
     const IS_PAWN: bool;
     const IS_KING: bool;
@@ -239,6 +241,37 @@ macro_rules! for_each_simple_slider {
         {
             type $T = ConstBishop;
             const $piece: Piece = Piece::Bishop;
+            $body
+        }
+    }};
+}
+
+macro_rules! for_each_const_piece {
+    // syntax: for_each_const_piece!(|Type, PIECE| { ... })
+    (|$T:ident, $piece:ident| $body:block) => {{
+        {
+            type $T = ConstPawn;
+            const $piece: Piece = Piece::Pawn;
+            $body
+        }
+        {
+            type $T = ConstKnight;
+            const $piece: Piece = Piece::Knight;
+            $body
+        }
+        {
+            type $T = ConstBishop;
+            const $piece: Piece = Piece::Bishop;
+            $body
+        }
+        {
+            type $T = ConstRook;
+            const $piece: Piece = Piece::Rook;
+            $body
+        }
+        {
+            type $T = ConstQueen;
+            const $piece: Piece = Piece::Queen;
             $body
         }
     }};
@@ -652,17 +685,14 @@ impl Game {
         self.unset_piece(board_move.get_from());
 
         if P::PIECE == Piece::Pawn {
-            // handle promotion
-            let mut final_piece = P::PIECE;
-            if P::PIECE == Piece::Pawn
-                && (board_move.get_to().get_y() == 7 || board_move.get_to().get_y() == 0)
-            {
-                final_piece = board_move
-                    .get_promotion()
-                    .expect("Pawn move to last rank must contain promotion information.");
+            if board_move.get_to().get_y() == 7 || board_move.get_to().get_y() == 0 {
+                self.set_piece(
+                    board_move.get_to(),
+                    (board_move.get_promotion().unwrap(), C::COLOR),
+                );
+            } else {
+                self.set_piece_const::<ConstPawn, C>(board_move.get_to());
             }
-
-            self.set_piece(board_move.get_to(), (final_piece, C::COLOR));
         } else {
             self.set_piece_const::<P, C>(board_move.get_to());
         }
@@ -840,25 +870,6 @@ impl Game {
 
         // Shift to the correct rank
         castling_moves << (C::OPPONENT_INDEX * 56)
-    }
-
-    ///
-    /// Generate a bitboard that contains pseud-legal moves for a particular square,
-    /// ignoring most safety-related rules and using the color of the piece as the
-    /// current turn (i.e. ignoring `this.side`).
-    ///
-    /// TODO: this should have <C>
-    ///
-    fn get_pseudo_legal_move_bitboard(&self, square: BoardSquare) -> Bitboard {
-        let (piece, color) = self.pieces[square as usize].unwrap();
-
-        return dispatch_piece_color!(
-            piece,
-            color,
-            get_pseudo_legal_move_bitboard_const,
-            self,
-            square
-        );
     }
 
     ///
@@ -1170,6 +1181,134 @@ impl Game {
         }
     }
 
+    fn process_zero_attack_moves_const<P: ConstPiece, C: ConstColor>(
+        &self,
+        pin_data: &PinData,
+        king_position: BoardSquare,
+        moves: &mut Vec<BoardMove>,
+    ) {
+        let move_bitboard = self.colored_piece_bitboard_const::<P, C>();
+
+        // for non-pawn pieces, just move
+        if P::PIECE != Piece::Pawn {
+            for square in move_bitboard.iter_positions() {
+                let pin_mask = pin_data.get_pin_mask_for_square(square);
+                let pseudo_legal_move_bitboard =
+                    self.get_pseudo_legal_move_bitboard_const::<P, C>(square);
+
+                self.add_regular_moves(square, pseudo_legal_move_bitboard & pin_mask, moves);
+            }
+
+            return;
+        }
+
+        // for pawns, we have special rules because en-passant sucks
+        let promotion_mask = if C::COLOR == Color::White {
+            WHITE_PROMOTION_ROW
+        } else {
+            BLACK_PROMOTION_ROW
+        };
+
+        // TODO: this is too much repeated code, refactor because ewwwwwwwww
+        for square in (move_bitboard & promotion_mask).iter_positions() {
+            let pin_mask = pin_data.get_pin_mask_for_square(square);
+            let pseudo_legal_move_bitboard =
+                self.get_pseudo_legal_move_bitboard_const::<ConstPawn, C>(square);
+
+            let legal_move_bitboard = pseudo_legal_move_bitboard & pin_mask;
+
+            self.add_promotion_moves(square, legal_move_bitboard & !self.en_passant_bitmap, moves);
+
+            if (legal_move_bitboard & self.en_passant_bitmap) != 0 {
+                let target = self.en_passant_bitmap.next_index();
+
+                if !self.check_discovered_en_passant_attack::<C>(square, king_position) {
+                    for promotion_piece in [Piece::Queen, Piece::Rook, Piece::Bishop, Piece::Knight]
+                    {
+                        moves.push(BoardMove::promoting(square, target, promotion_piece));
+                    }
+                }
+            }
+        }
+
+        for square in (move_bitboard & !promotion_mask).iter_positions() {
+            let pin_mask = pin_data.get_pin_mask_for_square(square);
+            let pseudo_legal_move_bitboard =
+                self.get_pseudo_legal_move_bitboard_const::<ConstPawn, C>(square);
+
+            let legal_move_bitboard = pseudo_legal_move_bitboard & pin_mask;
+
+            self.add_regular_moves(square, legal_move_bitboard & !self.en_passant_bitmap, moves);
+
+            if (legal_move_bitboard & self.en_passant_bitmap) != 0 {
+                let target = self.en_passant_bitmap.next_index();
+
+                if !self.check_discovered_en_passant_attack::<C>(square, king_position) {
+                    moves.push(BoardMove::regular(square, target));
+                }
+            }
+        }
+    }
+
+    fn process_one_attack_moves_const<P: ConstPiece, P_ATTACK: ConstPiece, C: ConstColor>(
+        &self,
+        pin_data: &PinData,
+        king_position: BoardSquare,
+        attacking_position: BoardSquare,
+        moves: &mut Vec<BoardMove>,
+    ) {
+        let move_bitboard = self.colored_piece_bitboard_const::<P, C>();
+
+        // go through all non-king pieces
+        for square in move_bitboard.iter_positions() {
+            // Get pin mask for this square if it's pinned
+            let pin_mask = pin_data.get_pin_mask_for_square(square);
+
+            let mut bitboard = Bitboard::default();
+
+            if !P_ATTACK::IS_SLIDER {
+                // There is a special bullshit case where a pawn attacks a king and we can take it via en-passant
+                if P::PIECE == Piece::Pawn
+                    && P_ATTACK::PIECE == Piece::Pawn
+                    && (self.en_passant_bitmap
+                        & self.get_piece_attack_bitboard_const::<ConstPawn, C>(square))
+                        & pin_mask
+                        != 0
+                {
+                    moves.push(BoardMove::regular(
+                        square,
+                        self.en_passant_bitmap.next_index(),
+                    ));
+                    continue;
+                }
+
+                bitboard = self.get_pseudo_legal_move_bitboard_const::<P, C>(square)
+                    & attacking_position.to_mask()
+                    & pin_mask;
+            } else {
+                // If it is a slider, we can either take, or block
+                let attack_data = self.get_single_slider_attack_data_const::<C>(king_position);
+
+                bitboard = self.get_pseudo_legal_move_bitboard_const::<P, C>(square)
+                    & attack_data
+                    & pin_mask;
+            }
+
+            // for pawns, we have special rules because en-passant sucks
+            let promotion_mask = if C::COLOR == Color::White {
+                WHITE_PROMOTION_ROW
+            } else {
+                BLACK_PROMOTION_ROW
+            };
+
+            if P::PIECE == Piece::Pawn && (square.to_mask() & promotion_mask) != 0 {
+                self.add_promotion_moves(square, bitboard, moves);
+            } else {
+                self.add_regular_moves(square, bitboard, moves);
+            }
+        }
+    }
+
     ///
     /// Obtain a list of valid moves for the current position.
     ///
@@ -1183,83 +1322,9 @@ impl Game {
             // king is not under attack, so just move regularly, but not into a pin
             let pin_data = self.get_pinner_bitboards_const::<C>();
 
-            let non_king_pieces_to_move_bitboard =
-                self.color_bitboards[C::COLOR as usize] & !king_position.to_mask();
-
-            let pawns_to_move_bitboard = non_king_pieces_to_move_bitboard
-                & self.colored_piece_bitboard_const::<ConstPawn, C>();
-
-            // for non-pawn pieces, just move
-            for square in
-                (non_king_pieces_to_move_bitboard & !pawns_to_move_bitboard).iter_positions()
-            {
-                let pin_mask = pin_data.get_pin_mask_for_square(square);
-                let pseudo_legal_move_bitboard = self.get_pseudo_legal_move_bitboard(square);
-
-                self.add_regular_moves(square, pseudo_legal_move_bitboard & pin_mask, &mut moves);
-            }
-
-            // for pawns, we have special rules because en-passant sucks
-            let promotion_mask = if C::COLOR == Color::White {
-                WHITE_PROMOTION_ROW
-            } else {
-                BLACK_PROMOTION_ROW
-            };
-
-            // TODO: this is too much repeated code, refactor because ewwwwwwwww
-            for square in
-                (non_king_pieces_to_move_bitboard & pawns_to_move_bitboard & promotion_mask)
-                    .iter_positions()
-            {
-                let pin_mask = pin_data.get_pin_mask_for_square(square);
-                let pseudo_legal_move_bitboard =
-                    self.get_pseudo_legal_move_bitboard_const::<ConstPawn, C>(square);
-
-                let legal_move_bitboard = pseudo_legal_move_bitboard & pin_mask;
-
-                self.add_promotion_moves(
-                    square,
-                    legal_move_bitboard & !self.en_passant_bitmap,
-                    &mut moves,
-                );
-
-                if (legal_move_bitboard & self.en_passant_bitmap) != 0 {
-                    let target = self.en_passant_bitmap.next_index();
-
-                    if !self.check_discovered_en_passant_attack::<C>(square, king_position) {
-                        for promotion_piece in
-                            [Piece::Queen, Piece::Rook, Piece::Bishop, Piece::Knight]
-                        {
-                            moves.push(BoardMove::promoting(square, target, promotion_piece));
-                        }
-                    }
-                }
-            }
-
-            for square in
-                (non_king_pieces_to_move_bitboard & pawns_to_move_bitboard & !promotion_mask)
-                    .iter_positions()
-            {
-                let pin_mask = pin_data.get_pin_mask_for_square(square);
-                let pseudo_legal_move_bitboard =
-                    self.get_pseudo_legal_move_bitboard_const::<ConstPawn, C>(square);
-
-                let legal_move_bitboard = pseudo_legal_move_bitboard & pin_mask;
-
-                self.add_regular_moves(
-                    square,
-                    legal_move_bitboard & !self.en_passant_bitmap,
-                    &mut moves,
-                );
-
-                if (legal_move_bitboard & self.en_passant_bitmap) != 0 {
-                    let target = self.en_passant_bitmap.next_index();
-
-                    if !self.check_discovered_en_passant_attack::<C>(square, king_position) {
-                        moves.push(BoardMove::regular(square, target));
-                    }
-                }
-            }
+            for_each_const_piece!(|P, piece| {
+                self.process_zero_attack_moves_const::<P, C>(&pin_data, king_position, &mut moves);
+            });
 
             // for king, just don't move into an attack
             let bitboard = self.get_pseudo_legal_move_bitboard_const::<ConstKing, C>(king_position);
@@ -1277,57 +1342,58 @@ impl Game {
             let attacking_position = king_attacks.next_index();
             let (attacking_piece, _) = self.pieces[attacking_position as usize].unwrap();
 
-            // go through all non-king pieces
-            for square in
-                (self.color_bitboards[C::COLOR_INDEX] & !king_position.to_mask()).iter_positions()
-            {
-                // Get pin mask for this square if it's pinned
-                let pin_mask = pin_data.get_pin_mask_for_square(square);
-
-                let mut resulting_bitboard = Bitboard::default();
-
-                // If it's not a slider, all we can do is take it, so combine pins with its square
-                let (moving_piece, moving_color) = self.pieces[square as usize].unwrap();
-
-                if !attacking_piece.is_slider() {
-                    // There is a special bullshit case where a pawn attacks a king and we can take it via en-passant
-                    if attacking_piece == Piece::Pawn
-                        && moving_piece == Piece::Pawn
-                        && (self.en_passant_bitmap
-                            & self.get_piece_attack_bitboard_const::<ConstPawn, C>(square))
-                            & pin_mask
-                            != 0
-                    {
-                        moves.push(BoardMove::regular(
-                            square,
-                            self.en_passant_bitmap.next_index(),
-                        ));
-                        continue;
-                    }
-
-                    resulting_bitboard = self.get_pseudo_legal_move_bitboard(square)
-                        & attacking_position.to_mask()
-                        & pin_mask;
-                } else {
-                    // If it is a slider, we can either take, or block
-                    let attack_data = self.get_single_slider_attack_data_const::<C>(king_position);
-
-                    resulting_bitboard =
-                        self.get_pseudo_legal_move_bitboard(square) & attack_data & pin_mask;
+            match attacking_piece {
+                Piece::Pawn => {
+                    for_each_const_piece!(|P, piece| {
+                        self.process_one_attack_moves_const::<P, ConstPawn, C>(
+                            &pin_data,
+                            king_position,
+                            attacking_position,
+                            &mut moves,
+                        );
+                    });
                 }
-
-                // for pawns, we have special rules because en-passant sucks
-                let promotion_mask = if C::COLOR == Color::White {
-                    WHITE_PROMOTION_ROW
-                } else {
-                    BLACK_PROMOTION_ROW
-                };
-
-                if moving_piece == Piece::Pawn && (square.to_mask() & promotion_mask) != 0 {
-                    self.add_promotion_moves(square, resulting_bitboard, &mut moves);
-                } else {
-                    self.add_regular_moves(square, resulting_bitboard, &mut moves);
+                Piece::Knight => {
+                    for_each_const_piece!(|P, piece| {
+                        self.process_one_attack_moves_const::<P, ConstKnight, C>(
+                            &pin_data,
+                            king_position,
+                            attacking_position,
+                            &mut moves,
+                        );
+                    });
                 }
+                Piece::Bishop => {
+                    for_each_const_piece!(|P, piece| {
+                        self.process_one_attack_moves_const::<P, ConstBishop, C>(
+                            &pin_data,
+                            king_position,
+                            attacking_position,
+                            &mut moves,
+                        );
+                    });
+                }
+                Piece::Rook => {
+                    for_each_const_piece!(|P, piece| {
+                        self.process_one_attack_moves_const::<P, ConstRook, C>(
+                            &pin_data,
+                            king_position,
+                            attacking_position,
+                            &mut moves,
+                        );
+                    });
+                }
+                Piece::Queen => {
+                    for_each_const_piece!(|P, piece| {
+                        self.process_one_attack_moves_const::<P, ConstQueen, C>(
+                            &pin_data,
+                            king_position,
+                            attacking_position,
+                            &mut moves,
+                        );
+                    });
+                }
+                _ => unreachable!(),
             }
 
             self.add_king_evade_or_capture_moves_const::<C>(
