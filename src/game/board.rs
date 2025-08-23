@@ -3,11 +3,10 @@ use crate::game::ColoredPiece;
 use crate::utils::Bitboard;
 use crate::zobris::ZOBRIST;
 use crate::{
-    BitboardExt, BoardSquare, BoardSquareExt, MAGIC_BISHOP_BLOCKER_BITBOARD, MAGIC_ENTRIES,
-    MAGIC_ROOK_BLOCKER_BITBOARD, MAGIC_TABLE, PIECE_MOVE_BITBOARDS,
+    BitboardExt, BoardSquare, BoardSquareExt, MAGIC_BLOCKER_BITBOARD, MAGIC_ENTRIES, MAGIC_TABLE,
+    PIECE_MOVE_BITBOARDS,
 };
 use strum::EnumCount;
-use strum::IntoEnumIterator;
 
 pub type BoardMove = u16;
 
@@ -128,6 +127,85 @@ impl Iterator for ValidMovesIterator {
     }
 }
 
+pub struct PieceMovesIterator {
+    bitboard: Bitboard,
+    square: BoardSquare,
+}
+
+impl PieceMovesIterator {
+    pub fn new(bitboard: Bitboard, square: BoardSquare) -> Self {
+        Self { bitboard, square }
+    }
+}
+
+impl Iterator for PieceMovesIterator {
+    type Item = BoardMove;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.bitboard == 0 {
+            return None;
+        }
+
+        let to_square = self.bitboard.next_index();
+        self.bitboard &= self.bitboard - 1;
+
+        Some(BoardMove::new(self.square.clone(), to_square, None))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let count = self.bitboard.count_ones() as usize;
+        (count, Some(count))
+    }
+}
+
+pub struct PromotingMovesIterator {
+    bitboard: Bitboard,
+    square: BoardSquare,
+    current_promotion: usize,
+}
+
+impl PromotingMovesIterator {
+    pub fn new(bitboard: Bitboard, square: BoardSquare) -> Self {
+        Self {
+            bitboard,
+            square,
+            current_promotion: 0,
+        }
+    }
+}
+
+impl Iterator for PromotingMovesIterator {
+    type Item = BoardMove;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.bitboard == 0 {
+            return None;
+        }
+
+        let to_square = self.bitboard.next_index();
+
+        let result = Some(BoardMove::new(
+            self.square,
+            to_square,
+            Piece::from_repr(self.current_promotion),
+        ));
+
+        self.current_promotion += 1;
+
+        if self.current_promotion == 4 {
+            self.bitboard &= self.bitboard - 1;
+            self.current_promotion = 0;
+        }
+
+        result
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let count = self.bitboard.count_ones() as usize * 4; // 4 promotion pieces per square
+        (count, Some(count))
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct PinInfo {
     pub pinned_piece_position: BoardSquare,
@@ -143,23 +221,24 @@ pub struct PinData {
 
 impl PinData {
     /// Get pin mask for a specific square
-    pub fn get_pin_mask_for_square(&self, square: BoardSquare) -> Option<Bitboard> {
+    pub fn get_pin_mask_for_square(&self, square: BoardSquare) -> Bitboard {
         // Check if this square has a pinned piece
         if (self.all_pinned_pieces & (1 << square)) == 0 {
-            return None;
+            return !0;
         }
 
         // Find the pin info for this square
+        // TODO: this shit is very slow
         for piece_type in 0..2 {
             for i in 0..self.pin_counts[piece_type] {
                 let pin_info = &self.pins[piece_type][i];
                 if pin_info.pinned_piece_position == square {
-                    return Some(pin_info.valid_move_squares);
+                    return pin_info.valid_move_squares;
                 }
             }
         }
 
-        None
+        unreachable!()
     }
 }
 
@@ -242,6 +321,17 @@ macro_rules! dispatch_piece {
             Piece::Rook => $game.$func::<ConstRook>($($args),*),
             Piece::Queen => $game.$func::<ConstQueen>($($args),*),
             Piece::King => $game.$func::<ConstKing>($($args),*),
+        }
+    };
+}
+
+macro_rules! dispatch_slider {
+    ($piece:expr, $func:ident, $game:expr, $($args:expr),*) => {
+        match $piece {
+            Piece::Bishop => $game.$func::<ConstBishop>($($args),*),
+            Piece::Rook => $game.$func::<ConstRook>($($args),*),
+            Piece::Queen => $game.$func::<ConstQueen>($($args),*),
+            _ => unreachable!()
         }
     };
 }
@@ -761,7 +851,7 @@ impl Game {
     fn get_occlusion_bitmap_const<P: ConstPiece>(
         &self,
         square: BoardSquare,
-        blockers: Option<Bitboard>,
+        blockers: Bitboard,
     ) -> Bitboard {
         match P::PIECE {
             Piece::Queen => {
@@ -771,22 +861,11 @@ impl Game {
                     self.get_occlusion_bitmap_const::<ConstBishop>(square, blockers);
                 rook_attacks | bishop_attacks
             }
-            Piece::Rook => {
-                let possible_blocker_positions_bitboard =
-                    MAGIC_ROOK_BLOCKER_BITBOARD[square as usize];
-                let key = possible_blocker_positions_bitboard & blockers.unwrap_or(self.all_pieces);
+            Piece::Rook | Piece::Bishop => {
+                let key = MAGIC_BLOCKER_BITBOARD[P::PIECE_INDEX * 64 + square as usize] & blockers;
 
-                let (magic_number, table_offset, bit_offset) = MAGIC_TABLE[square as usize]; // offset 0 for rook
-
-                MAGIC_ENTRIES
-                    [table_offset + (magic_number.wrapping_mul(key) >> bit_offset) as usize]
-            }
-            Piece::Bishop => {
-                let possible_blocker_positions_bitboard =
-                    MAGIC_BISHOP_BLOCKER_BITBOARD[square as usize];
-                let key = possible_blocker_positions_bitboard & blockers.unwrap_or(self.all_pieces);
-
-                let (magic_number, table_offset, bit_offset) = MAGIC_TABLE[64 + square as usize]; // offset 64 for bishop
+                let (magic_number, table_offset, bit_offset) =
+                    MAGIC_TABLE[P::PIECE_INDEX * 64 + square as usize];
 
                 MAGIC_ENTRIES
                     [table_offset + (magic_number.wrapping_mul(key) >> bit_offset) as usize]
@@ -822,7 +901,7 @@ impl Game {
 
             if P::IS_SLIDER {
                 // Apply magic bitboard occlusion for sliding pieces
-                valid_moves &= self.get_occlusion_bitmap_const::<P>(square, None);
+                valid_moves &= self.get_occlusion_bitmap_const::<P>(square, self.all_pieces);
             }
 
             valid_moves
@@ -908,7 +987,9 @@ impl Game {
     }
 
     ///
-    /// Generic const version of get_pseudo_legal_move_bitboard.
+    /// Generate a bitboard that contains pseud-legal moves for a particular square,
+    /// ignoring most safety-related rules and using the color of the piece as the
+    /// current turn (i.e. ignoring `this.side`).
     ///
     fn get_pseudo_legal_move_bitboard_const<P: ConstPiece, C: ConstColor>(
         &self,
@@ -1003,26 +1084,21 @@ impl Game {
 
     ///
     /// Check for the attack on a square by a particular color.
-    /// Const generic version for compile-time color optimization.
     ///
     fn is_square_attacked_const<C: ConstColor>(&self, square: BoardSquare) -> bool {
         self.get_attacked_from_const::<C>(square) != 0
     }
 
     ///
-    /// Return valid moves for a particular square, optionally masked by pin restrictions.
+    /// Return valid moves for a particular square, masked by a bitmap.
     ///
     pub fn get_square_pseudo_legal_moves(
         &self,
         square: BoardSquare,
-        valid_move_mask: Option<Bitboard>,
+        valid_move_mask: Bitboard,
     ) -> ValidMovesIterator {
         let mut bitboard = self.get_pseudo_legal_move_bitboard(square);
-
-        // Apply pin mask if provided
-        if let Some(mask) = valid_move_mask {
-            bitboard &= mask;
-        }
+        bitboard &= valid_move_mask;
 
         // pawn on second to last rank must promote on the last rank
         let is_promoting = self.pieces[square as usize].is_some_and(|(p, c)| {
@@ -1057,14 +1133,12 @@ impl Game {
         //  Kng  (1)  (2)   |
         //
         for_each_simple_slider!(|P, piece| {
-            let piece_idx = piece as usize;
-
             // (1) get occlusions to get possible pinned pieces
-            let raycast_1 = self.get_occlusion_bitmap_const::<P>(king_position, None);
+            let raycast_1 = self.get_occlusion_bitmap_const::<P>(king_position, self.all_pieces);
 
             // (2) subtract the calculated occlusions from blockers to get the blocked pieces
-            let raycast_2 = self
-                .get_occlusion_bitmap_const::<P>(king_position, Some(self.all_pieces & !raycast_1));
+            let raycast_2 =
+                self.get_occlusion_bitmap_const::<P>(king_position, self.all_pieces & !raycast_1);
 
             // now we can get a bitmap of the attackers that are pinning things down
             // queen accounts for both rook and bishop so we count it both times
@@ -1077,7 +1151,7 @@ impl Game {
                 // (3) cast back from attacker to get the raycast
                 let raycast_3 = self.get_occlusion_bitmap_const::<P>(
                     attacker_position,
-                    Some(self.all_pieces & !raycast_1),
+                    self.all_pieces & !raycast_1,
                 );
 
                 // only one pinned pieces
@@ -1096,8 +1170,8 @@ impl Game {
                 pin_data.all_pinned_pieces |= 1 << pinned_piece_position;
 
                 // Add to appropriate array using piece value as index
-                pin_data.pins[piece_idx][pin_data.pin_counts[piece_idx]] = pin_info;
-                pin_data.pin_counts[piece_idx] += 1;
+                pin_data.pins[P::PIECE_INDEX][pin_data.pin_counts[P::PIECE_INDEX]] = pin_info;
+                pin_data.pin_counts[P::PIECE_INDEX] += 1;
             }
         });
 
@@ -1117,7 +1191,7 @@ impl Game {
         // Check all slider pieces that could be attacking the king
         for_each_simple_slider!(|P, piece| {
             // (1) Raycast from king to find potential attackers
-            let raycast_from_king = self.get_occlusion_bitmap_const::<P>(position, None);
+            let raycast_from_king = self.get_occlusion_bitmap_const::<P>(position, self.all_pieces);
 
             // Find enemy sliders (including queens) that could attack along this ray
             let potential_attackers = (self.colored_piece_bitboard_const::<P, C::Opponent>()
@@ -1128,7 +1202,7 @@ impl Game {
             for attacker_position in potential_attackers.iter_positions() {
                 // (2) Raycast back from attacker to king with current board state
                 let raycast_from_attacker =
-                    self.get_occlusion_bitmap_const::<P>(attacker_position, Some(self.all_pieces));
+                    self.get_occlusion_bitmap_const::<P>(attacker_position, self.all_pieces);
 
                 // Valid positions to block are the rays between the attacker and the king,
                 // and the attacker position
@@ -1154,14 +1228,15 @@ impl Game {
     fn add_king_evade_or_capture_moves_const<C: ConstColor>(
         &self,
         king_position: BoardSquare,
-        king_attacks: Bitboard,
+        attacked_from_bitboard: Bitboard,
         moves: &mut Vec<BoardMove>,
     ) {
         // we need to collect bitboards of attacking sliders, as king could otherwise
         // move "away" from them, which is technically a safe square
         let mut slider_attack_bitboard = Bitboard::default();
 
-        for position in king_attacks.iter_positions() {
+        // TODO: unwrap with piece bitmaps
+        for position in attacked_from_bitboard.iter_positions() {
             let (piece, _) = self.pieces[position as usize].unwrap();
 
             slider_attack_bitboard |= dispatch_piece!(
@@ -1169,18 +1244,17 @@ impl Game {
                 get_occlusion_bitmap_const,
                 self,
                 position,
-                Some(self.all_pieces & !king_position.to_mask())
+                self.all_pieces & !king_position.to_mask()
             );
         }
 
-        // now we can only move to spots that are not attacked by the sliders
-        for board_move in
-            self.get_square_pseudo_legal_moves(king_position, Some(!slider_attack_bitboard))
-        {
-            // Check if the destination square is attacked by the opponent
+        let legal_move_bitboard = self
+            .get_pseudo_legal_move_bitboard_const::<ConstKing, C>(king_position)
+            & !slider_attack_bitboard;
 
-            let is_attacked = self.is_square_attacked_const::<C::Opponent>(board_move.get_to());
-            if !is_attacked {
+        for board_move in PieceMovesIterator::new(legal_move_bitboard, king_position) {
+            // now we can only move to spots that are not attacked by the sliders
+            if !self.is_square_attacked_const::<C::Opponent>(board_move.get_to()) {
                 moves.push(board_move);
             }
         }
@@ -1229,7 +1303,7 @@ impl Game {
                         // Check if this exposes the king to a rook/queen attack along the rank
                         let rook_attacks = self.get_occlusion_bitmap_const::<ConstRook>(
                             king_position,
-                            Some(simulated_blockers),
+                            simulated_blockers,
                         );
 
                         // Check if any enemy rooks or queens can now attack the king
@@ -1248,7 +1322,7 @@ impl Game {
             }
 
             // for king, just don't move into an attack
-            for board_move in self.get_square_pseudo_legal_moves(king_position, None) {
+            for board_move in self.get_square_pseudo_legal_moves(king_position, !0) {
                 if !self.is_square_attacked_const::<C::Opponent>(board_move.get_to()) {
                     moves.push(board_move);
                 }
@@ -1278,7 +1352,7 @@ impl Game {
                         && moving_piece == Piece::Pawn
                         && (self.en_passant_bitmap
                             & self.get_piece_attack_bitboard_const::<ConstPawn, C>(square))
-                            & pin_mask.unwrap_or(!0)
+                            & pin_mask
                             != 0
                     {
                         moves.push(BoardMove::new(
@@ -1291,7 +1365,7 @@ impl Game {
 
                     for board_move in self.get_square_pseudo_legal_moves(
                         square,
-                        Some(attacking_position.to_mask() & pin_mask.unwrap_or(!0)),
+                        attacking_position.to_mask() & pin_mask,
                     ) {
                         moves.push(board_move);
                     }
@@ -1299,10 +1373,9 @@ impl Game {
                     // If it is a slider, we can either take, or block
                     let attack_data = self.get_single_slider_attack_data_const::<C>(king_position);
 
-                    for board_move in self.get_square_pseudo_legal_moves(
-                        square,
-                        Some(attack_data & pin_mask.unwrap_or(!0)),
-                    ) {
+                    for board_move in
+                        self.get_square_pseudo_legal_moves(square, attack_data & pin_mask)
+                    {
                         moves.push(board_move);
                     }
                 }

@@ -389,6 +389,26 @@ pub const MAGIC_ROOK_BLOCKER_BITBOARD: PieceBitboards =
 pub const MAGIC_BISHOP_BLOCKER_BITBOARD: PieceBitboards =
     calculate_blocker_bitboards(get_attack_piece_deltas(&Piece::Bishop, 0));
 
+pub const MAGIC_BLOCKER_BITBOARD: [Bitboard; 128] = {
+    let mut combined = [0u64; 128];
+    let mut i = 0;
+
+    // Copy rook bitboards (first 64 elements)
+    while i < 64 {
+        combined[i] = MAGIC_ROOK_BLOCKER_BITBOARD[i];
+        i += 1;
+    }
+
+    // Copy bishop bitboards (next 64 elements)
+    i = 0;
+    while i < 64 {
+        combined[64 + i] = MAGIC_BISHOP_BLOCKER_BITBOARD[i];
+        i += 1;
+    }
+
+    combined
+};
+
 pub struct MagicBitboardEntry {
     pub magic: u64,
     pub shift: u8,
