@@ -1,5 +1,5 @@
-use Prokopakop::controller::{ControllerMode, GameController};
 use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
+use prokopakop::controller::{ControllerMode, GameController};
 
 fn perft_benchmark(c: &mut Criterion) {
     // Starting position perft benchmarks

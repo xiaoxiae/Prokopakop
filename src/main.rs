@@ -95,6 +95,9 @@ fn main() {
         match controller.mode {
             // UCI-only commands
             Some(ControllerMode::UCI) => match input {
+                Some(GUICommand::SetOption(name, value)) => {
+                    controller.set_option(name.as_str(), value.as_str())
+                }
                 Some(GUICommand::IsReady) => GUICommand::respond(BotCommand::ReadyOk),
                 Some(GUICommand::ValidMoves(depth_string)) => {
                     let moves = controller

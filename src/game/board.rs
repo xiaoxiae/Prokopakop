@@ -170,11 +170,6 @@ impl ConstColor for ConstBlack {
 pub trait ConstPiece {
     const PIECE: Piece;
     const PIECE_INDEX: usize;
-
-    // TODO: remove these since they're duplicate
-    const IS_SLIDER: bool;
-    const IS_PAWN: bool;
-    const IS_KING: bool;
 }
 
 macro_rules! impl_const_piece {
@@ -184,9 +179,6 @@ macro_rules! impl_const_piece {
         impl ConstPiece for $struct_name {
             const PIECE: Piece = $piece;
             const PIECE_INDEX: usize = $piece as usize;
-            const IS_SLIDER: bool = matches!($piece, Piece::Bishop | Piece::Rook | Piece::Queen);
-            const IS_PAWN: bool = matches!($piece, Piece::Pawn);
-            const IS_KING: bool = matches!($piece, Piece::King);
         }
     };
 }
@@ -775,7 +767,7 @@ impl Game {
         &self,
         square: BoardSquare,
     ) -> Bitboard {
-        if P::IS_PAWN {
+        if P::PIECE == Piece::Pawn {
             // Compile-time pawn attack calculation based on color
             match C::COLOR {
                 Color::White => {
@@ -793,7 +785,7 @@ impl Game {
             // Use pre-calculated attack bitboards for other pieces
             let mut valid_moves = PIECE_MOVE_BITBOARDS[P::PIECE_INDEX][square as usize];
 
-            if P::IS_SLIDER {
+            if P::PIECE.is_slider() {
                 // Apply magic bitboard occlusion for sliding pieces
                 valid_moves &= self.get_occlusion_bitmap_const::<P>(square, self.all_pieces);
             }
@@ -875,7 +867,7 @@ impl Game {
         // Get attack moves (which are also regular moves for all but pawns)
         let mut valid_moves = self.get_piece_attack_bitboard_const::<P, C>(square);
 
-        if P::IS_PAWN {
+        if P::PIECE == Piece::Pawn {
             // Attack moves only when there is enemy or en-passant
             valid_moves &= self.color_bitboards[C::OPPONENT_INDEX] | self.en_passant_bitmap;
 
@@ -901,7 +893,7 @@ impl Game {
                     valid_moves |= double_forward;
                 }
             }
-        } else if P::IS_KING {
+        } else if P::PIECE == Piece::King {
             // Only add castling if king is not under attack
             let king_position = self
                 .colored_piece_bitboard_const::<ConstKing, C>()
@@ -1085,16 +1077,27 @@ impl Game {
         // move "away" from them, which is technically a safe square
         let mut slider_attack_bitboard = Bitboard::default();
 
-        // TODO: unwrap with piece bitmaps
-        for position in attacked_from_bitboard.iter_positions() {
-            let (piece, _) = self.pieces[position as usize].unwrap();
+        // Replace the TODO section with:
+        let opponent_rooks =
+            attacked_from_bitboard & self.colored_piece_bitboard_const::<ConstRook, C::Opponent>();
+        let opponent_bishops = attacked_from_bitboard
+            & self.colored_piece_bitboard_const::<ConstBishop, C::Opponent>();
+        let opponent_queens =
+            attacked_from_bitboard & self.colored_piece_bitboard_const::<ConstQueen, C::Opponent>();
 
-            slider_attack_bitboard |= dispatch_piece!(
-                piece,
-                get_occlusion_bitmap_const,
-                self,
+        // Process rook attacks (including queen's rook-like attacks)
+        for position in (opponent_rooks | opponent_queens).iter_positions() {
+            slider_attack_bitboard |= self.get_occlusion_bitmap_const::<ConstRook>(
                 position,
-                self.all_pieces & !king_position.to_mask()
+                self.all_pieces & !king_position.to_mask(),
+            );
+        }
+
+        // Process bishop attacks (including queen's bishop-like attacks)
+        for position in (opponent_bishops | opponent_queens).iter_positions() {
+            slider_attack_bitboard |= self.get_occlusion_bitmap_const::<ConstBishop>(
+                position,
+                self.all_pieces & !king_position.to_mask(),
             );
         }
 
@@ -1282,7 +1285,7 @@ impl Game {
 
             let bitboard;
 
-            if !PA::IS_SLIDER {
+            if !PA::PIECE.is_slider() {
                 // There is a special bullshit case where a pawn attacks a king and we can take it via en-passant
                 if P::PIECE == Piece::Pawn
                     && PA::PIECE == Piece::Pawn
