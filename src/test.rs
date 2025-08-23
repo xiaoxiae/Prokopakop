@@ -79,9 +79,9 @@ mod tests {
         let initial_zobrist = controller.game.zobrist_key;
         let initial_fen = controller.game.get_fen();
 
-        let moves = controller.game.get_moves();
+        let (count, moves) = controller.game.get_moves();
 
-        for board_move in moves {
+        for board_move in moves.into_iter().take(count) {
             let move_str = format!("{:?}", board_move); // Adjust this based on your move representation
 
             // Make the move
@@ -188,9 +188,9 @@ mod tests {
             seen_positions.insert(zobrist_key, (current_fen, current_path.clone()));
         }
 
-        let moves = controller.game.get_moves();
+        let (count, moves) = controller.game.get_moves();
 
-        for board_move in moves {
+        for board_move in moves.into_iter().take(count) {
             let move_str = format!("{:?}", board_move);
 
             controller.game.make_move(board_move);
@@ -341,7 +341,7 @@ mod tests {
                 let mut controller = GameController::new();
                 controller.new_game_from_fen(fen);
 
-                let moves = controller.perft(*depth);
+                let moves = controller.perft(*depth, true);
 
                 let total_nodes: usize = moves.iter().map(|(_, count)| count).sum();
 

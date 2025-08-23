@@ -60,7 +60,7 @@ fn main() {
                 controller.new_game();
             }
 
-            let moves = controller.perft(depth);
+            let moves = controller.perft(depth, true); // Use hashing by default for CLI
             let mut total = 0;
             for (m, c) in &moves {
                 println!("{}: {}", m.unparse(), c);
@@ -95,13 +95,22 @@ fn main() {
             // UCI-only commands
             Some(ControllerMode::UCI) => match input {
                 Some(GUICommand::IsReady) => respond(BotCommand::ReadyOk),
+                Some(GUICommand::SetOption(name, value)) => {
+                    controller.set_option(&name, &value);
+                }
                 Some(GUICommand::ValidMoves(depth_string)) => {
-                    let moves = controller.perft(depth_string.parse::<usize>().unwrap());
+                    let moves = controller
+                        .perft(depth_string.parse::<usize>().unwrap(), controller.use_hash);
 
                     let mut total = 0;
                     for (m, c) in &moves {
                         println!("{}: {}", m.unparse(), c);
                         total += c;
+                    }
+
+                    if controller.use_hash {
+                        // Note: We can't access table size here since it's local to perft
+                        // Could be improved by returning table size from perft if needed
                     }
 
                     println!("\nNodes: {}", total);
@@ -132,7 +141,7 @@ fn main() {
                     // If parsing as move works, it has to be depth
                     match BoardSquare::parse(square_or_depth_string.as_str()) {
                         Some(square) => {
-                            let moves = controller.perft(0);
+                            let moves = controller.perft(0, false); // No hashing needed for depth 0
 
                             let moves_to = moves
                                 .iter()
@@ -146,6 +155,7 @@ fn main() {
                         None => {
                             let moves = controller.perft(
                                 square_or_depth_string.parse::<usize>().unwrap_or(1),
+                                true, // Use hashing by default in play mode
                             );
 
                             let mut total = 0;
@@ -166,6 +176,10 @@ fn main() {
                     let author = "Tomíno Komíno";
 
                     respond(BotCommand::Identify(name.to_string(), author.to_string()));
+
+                    // Announce available options
+                    println!("option name Hash type check default true");
+
                     respond(BotCommand::UCIOk);
 
                     controller.initialize(ControllerMode::UCI)

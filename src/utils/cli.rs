@@ -14,9 +14,10 @@ pub(crate) enum GUICommand {
     Fen,          // produce a fen string for the current position
 
     // Shared
-    Position(Option<String>), // `position` for both
-    ValidMoves(String),       // `go perf <depth>` for UCI, `moves` for player,
-    Quit,                     // quit the program
+    Position(Option<String>),  // `position` for both
+    ValidMoves(String),        // `go perf <depth>` for UCI, `moves` for player,
+    SetOption(String, String), // setoption name <name> value <value>
+    Quit,                      // quit the program
 
     // Miscellaneous
     Magic, // look for magic numbers
@@ -49,7 +50,9 @@ pub(crate) fn receive() -> Option<GUICommand> {
         ["position", "fen", fen @ ..] if !fen.is_empty() => {
             Some(GUICommand::Position(Some(fen.join(" "))))
         }
-        ["setoption", ..] => unimplemented!(),
+        ["setoption", "name", name, "value", value] => {
+            Some(GUICommand::SetOption(name.to_string(), value.to_string()))
+        }
         ["moves"] => Some(ValidMoves("1".to_string())),
         ["go", "perft", depth] | ["moves", depth] => Some(ValidMoves(depth.to_string())),
         ["play"] => Some(GUICommand::Play),

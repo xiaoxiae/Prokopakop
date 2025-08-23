@@ -1087,7 +1087,8 @@ impl Game {
         &self,
         king_position: BoardSquare,
         attacked_from_bitboard: Bitboard,
-        moves: &mut Vec<BoardMove>,
+        moves: &mut [BoardMove; 256],
+        move_count: &mut usize,
     ) {
         // we need to collect bitboards of attacking sliders, as king could otherwise
         // move "away" from them, which is technically a safe square
@@ -1112,7 +1113,8 @@ impl Game {
 
         for target in legal_move_bitboard.iter_positions() {
             if !self.is_square_attacked_const::<C::Opponent>(target) {
-                moves.push(BoardMove::regular(king_position, target));
+                moves[*move_count] = BoardMove::regular(king_position, target);
+                *move_count += 1;
             }
         }
     }
@@ -1155,11 +1157,13 @@ impl Game {
         &self,
         source: BoardSquare,
         mut target_bitboard: Bitboard,
-        moves: &mut Vec<BoardMove>,
+        moves: &mut [BoardMove; 256],
+        move_count: &mut usize,
     ) {
         while target_bitboard != 0 {
             let target = target_bitboard.next_index();
-            moves.push(BoardMove::regular(source, target));
+            moves[*move_count] = BoardMove::regular(source, target);
+            *move_count += 1;
             target_bitboard &= !target.to_mask();
         }
     }
@@ -1168,13 +1172,15 @@ impl Game {
         &self,
         source: BoardSquare,
         mut target_bitboard: Bitboard,
-        moves: &mut Vec<BoardMove>,
+        moves: &mut [BoardMove; 256],
+        move_count: &mut usize,
     ) {
         while target_bitboard != 0 {
             let target = target_bitboard.next_index();
 
             for promotion_piece in [Piece::Queen, Piece::Rook, Piece::Bishop, Piece::Knight] {
-                moves.push(BoardMove::promoting(source, target, promotion_piece));
+                moves[*move_count] = BoardMove::promoting(source, target, promotion_piece);
+                *move_count += 1;
             }
 
             target_bitboard &= !target.to_mask();
@@ -1185,7 +1191,8 @@ impl Game {
         &self,
         pin_data: &PinData,
         king_position: BoardSquare,
-        moves: &mut Vec<BoardMove>,
+        moves: &mut [BoardMove; 256],
+        move_count: &mut usize,
     ) {
         let move_bitboard = self.colored_piece_bitboard_const::<P, C>();
 
@@ -1196,7 +1203,12 @@ impl Game {
                 let pseudo_legal_move_bitboard =
                     self.get_pseudo_legal_move_bitboard_const::<P, C>(square);
 
-                self.add_regular_moves(square, pseudo_legal_move_bitboard & pin_mask, moves);
+                self.add_regular_moves(
+                    square,
+                    pseudo_legal_move_bitboard & pin_mask,
+                    moves,
+                    move_count,
+                );
             }
 
             return;
@@ -1217,7 +1229,12 @@ impl Game {
 
             let legal_move_bitboard = pseudo_legal_move_bitboard & pin_mask;
 
-            self.add_promotion_moves(square, legal_move_bitboard & !self.en_passant_bitmap, moves);
+            self.add_promotion_moves(
+                square,
+                legal_move_bitboard & !self.en_passant_bitmap,
+                moves,
+                move_count,
+            );
 
             if (legal_move_bitboard & self.en_passant_bitmap) != 0 {
                 let target = self.en_passant_bitmap.next_index();
@@ -1225,7 +1242,8 @@ impl Game {
                 if !self.check_discovered_en_passant_attack::<C>(square, king_position) {
                     for promotion_piece in [Piece::Queen, Piece::Rook, Piece::Bishop, Piece::Knight]
                     {
-                        moves.push(BoardMove::promoting(square, target, promotion_piece));
+                        moves[*move_count] = BoardMove::promoting(square, target, promotion_piece);
+                        *move_count += 1;
                     }
                 }
             }
@@ -1238,13 +1256,19 @@ impl Game {
 
             let legal_move_bitboard = pseudo_legal_move_bitboard & pin_mask;
 
-            self.add_regular_moves(square, legal_move_bitboard & !self.en_passant_bitmap, moves);
+            self.add_regular_moves(
+                square,
+                legal_move_bitboard & !self.en_passant_bitmap,
+                moves,
+                move_count,
+            );
 
             if (legal_move_bitboard & self.en_passant_bitmap) != 0 {
                 let target = self.en_passant_bitmap.next_index();
 
                 if !self.check_discovered_en_passant_attack::<C>(square, king_position) {
-                    moves.push(BoardMove::regular(square, target));
+                    moves[*move_count] = BoardMove::regular(square, target);
+                    *move_count += 1;
                 }
             }
         }
@@ -1255,7 +1279,8 @@ impl Game {
         pin_data: &PinData,
         king_position: BoardSquare,
         attacking_position: BoardSquare,
-        moves: &mut Vec<BoardMove>,
+        moves: &mut [BoardMove; 256],
+        move_count: &mut usize,
     ) {
         let move_bitboard = self.colored_piece_bitboard_const::<P, C>();
 
@@ -1275,10 +1300,9 @@ impl Game {
                         & pin_mask
                         != 0
                 {
-                    moves.push(BoardMove::regular(
-                        square,
-                        self.en_passant_bitmap.next_index(),
-                    ));
+                    moves[*move_count] =
+                        BoardMove::regular(square, self.en_passant_bitmap.next_index());
+                    *move_count += 1;
                     continue;
                 }
 
@@ -1302,9 +1326,9 @@ impl Game {
             };
 
             if P::PIECE == Piece::Pawn && (square.to_mask() & promotion_mask) != 0 {
-                self.add_promotion_moves(square, bitboard, moves);
+                self.add_promotion_moves(square, bitboard, moves, move_count);
             } else {
-                self.add_regular_moves(square, bitboard, moves);
+                self.add_regular_moves(square, bitboard, moves, move_count);
             }
         }
     }
@@ -1312,8 +1336,9 @@ impl Game {
     ///
     /// Obtain a list of valid moves for the current position.
     ///
-    pub fn get_moves_const<C: ConstColor>(&self) -> Vec<BoardMove> {
-        let mut moves = Vec::with_capacity(64); // Most positions have < 40 moves
+    pub fn get_moves_const<C: ConstColor>(&self) -> (usize, [BoardMove; 256]) {
+        let mut moves = [BoardMove::default(); 256];
+        let mut move_count = 0usize;
 
         let king_position = self.get_king_position_const::<C>();
         let king_attacks = self.get_attacked_from_const::<C::Opponent>(king_position);
@@ -1323,14 +1348,20 @@ impl Game {
             let pin_data = self.get_pinner_bitboards_const::<C>();
 
             for_each_const_piece!(|P, piece| {
-                self.process_zero_attack_moves_const::<P, C>(&pin_data, king_position, &mut moves);
+                self.process_zero_attack_moves_const::<P, C>(
+                    &pin_data,
+                    king_position,
+                    &mut moves,
+                    &mut move_count,
+                );
             });
 
             // for king, just don't move into an attack
             let bitboard = self.get_pseudo_legal_move_bitboard_const::<ConstKing, C>(king_position);
             for target in bitboard.iter_positions() {
                 if !self.is_square_attacked_const::<C::Opponent>(target) {
-                    moves.push(BoardMove::regular(king_position, target));
+                    moves[move_count] = BoardMove::regular(king_position, target);
+                    move_count += 1;
                 }
             }
         } else if king_attacks.count_ones() == 1 {
@@ -1350,6 +1381,7 @@ impl Game {
                             king_position,
                             attacking_position,
                             &mut moves,
+                            &mut move_count,
                         );
                     });
                 }
@@ -1360,6 +1392,7 @@ impl Game {
                             king_position,
                             attacking_position,
                             &mut moves,
+                            &mut move_count,
                         );
                     });
                 }
@@ -1370,6 +1403,7 @@ impl Game {
                             king_position,
                             attacking_position,
                             &mut moves,
+                            &mut move_count,
                         );
                     });
                 }
@@ -1380,6 +1414,7 @@ impl Game {
                             king_position,
                             attacking_position,
                             &mut moves,
+                            &mut move_count,
                         );
                     });
                 }
@@ -1390,6 +1425,7 @@ impl Game {
                             king_position,
                             attacking_position,
                             &mut moves,
+                            &mut move_count,
                         );
                     });
                 }
@@ -1400,6 +1436,7 @@ impl Game {
                 king_position,
                 king_attacks,
                 &mut moves,
+                &mut move_count,
             );
         } else {
             // can only evade if we have multiple attacks
@@ -1407,13 +1444,14 @@ impl Game {
                 king_position,
                 king_attacks,
                 &mut moves,
+                &mut move_count,
             );
         }
 
-        moves
+        (move_count, moves)
     }
 
-    pub fn get_moves(&self) -> Vec<BoardMove> {
+    pub fn get_moves(&self) -> (usize, [BoardMove; 256]) {
         match self.side {
             Color::White => self.get_moves_const::<ConstWhite>(),
             Color::Black => self.get_moves_const::<ConstBlack>(),

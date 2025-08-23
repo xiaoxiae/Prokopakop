@@ -10,6 +10,7 @@ pub enum ControllerMode {
 pub struct GameController {
     pub game: Game,
     pub mode: Option<ControllerMode>,
+    pub use_hash: bool,
 }
 
 pub type PerftTable = FxHashMap<u64, usize>;
@@ -19,6 +20,7 @@ impl GameController {
         Self {
             game: Game::new(None),
             mode: None,
+            use_hash: true, // Default to true
         }
     }
 
@@ -33,6 +35,22 @@ impl GameController {
     pub fn initialize(&mut self, mode: ControllerMode) {
         self.mode = Some(mode);
         self.new_game();
+    }
+
+    pub fn set_option(&mut self, name: &str, value: &str) {
+        match name.to_lowercase().as_str() {
+            "hash" => match value.to_lowercase().as_str() {
+                "true" => self.use_hash = true,
+                "false" => self.use_hash = false,
+                _ => eprintln!(
+                    "Invalid value for Hash option: {}. Expected 'true' or 'false'",
+                    value
+                ),
+            },
+            _ => {
+                eprintln!("Unknown option: {}", name);
+            }
+        }
     }
 
     pub fn print_with_moves(&self, possible_moves: Vec<BoardSquare>) {
@@ -124,9 +142,10 @@ impl GameController {
             .or(long_algebraic_notation.parse::<BoardMove>().ok())
         {
             Some(board_move) => {
-                let valid_moves = self.game.get_moves();
+                let (move_count, valid_moves) = self.game.get_moves();
 
-                if valid_moves.contains(&board_move) {
+                // Check if the move is in the valid moves array
+                if valid_moves[0..move_count].contains(&board_move) {
                     self.game.make_move(board_move);
                     MoveResultType::Success
                 } else {
@@ -147,20 +166,27 @@ impl GameController {
         }
     }
 
-    pub fn perft(&mut self, depth: usize) -> Vec<(BoardMove, usize)> {
+    pub fn perft(&mut self, depth: usize, hashing: bool) -> Vec<(BoardMove, usize)> {
         let mut table: PerftTable = FxHashMap::default();
         let mut move_breakdown = vec![];
 
         // Get all valid moves for the current position
-        for board_move in self.game.get_moves() {
-            let move_count = self.dfs_count_moves(board_move.clone(), depth, &mut table);
+        let (move_count, valid_moves) = self.game.get_moves();
+
+        for i in 0..move_count {
+            let board_move = valid_moves[i];
+            let move_count = if hashing {
+                self.dfs_count_moves_with_hashing(board_move, depth, &mut table)
+            } else {
+                self.dfs_count_moves_no_hashing(board_move, depth)
+            };
             move_breakdown.push((board_move, move_count));
         }
 
         move_breakdown
     }
 
-    fn dfs_count_moves(
+    fn dfs_count_moves_with_hashing(
         &mut self,
         initial_move: BoardMove,
         depth: usize,
@@ -179,18 +205,45 @@ impl GameController {
 
         let mut total_count = 0;
 
-        let current_moves = self.game.get_moves();
+        let (current_move_count, current_moves) = self.game.get_moves();
 
         // Bulk counting
-        if depth == 1 {
-            total_count = current_moves.len();
+        if depth == 2 {
+            total_count = current_move_count;
         } else {
-            for board_move in current_moves {
-                total_count += self.dfs_count_moves(board_move, depth - 1, table);
+            for i in 0..current_move_count {
+                let board_move = current_moves[i];
+                total_count += self.dfs_count_moves_with_hashing(board_move, depth - 1, table);
             }
         }
 
         table.insert(self.game.zobrist_key ^ depth as u64, total_count);
+
+        self.game.unmake_move();
+
+        total_count
+    }
+
+    fn dfs_count_moves_no_hashing(&mut self, initial_move: BoardMove, depth: usize) -> usize {
+        if depth <= 1 {
+            return 1;
+        }
+
+        self.game.make_move(initial_move);
+
+        let mut total_count = 0;
+
+        let (current_move_count, current_moves) = self.game.get_moves();
+
+        // Bulk counting
+        if depth == 2 {
+            total_count = current_move_count;
+        } else {
+            for i in 0..current_move_count {
+                let board_move = current_moves[i];
+                total_count += self.dfs_count_moves_no_hashing(board_move, depth - 1);
+            }
+        }
 
         self.game.unmake_move();
 

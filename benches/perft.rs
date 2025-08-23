@@ -16,7 +16,7 @@ fn perft_benchmark(c: &mut Criterion) {
                 let mut controller = GameController::new();
                 controller.initialize(ControllerMode::Play);
                 controller.new_game();
-                black_box(controller.perft(depth))
+                black_box(controller.perft(depth, true))
             });
         });
     }
