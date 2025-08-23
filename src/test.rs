@@ -79,9 +79,9 @@ mod tests {
         let initial_zobrist = controller.game.zobrist_key;
         let initial_fen = controller.game.get_fen();
 
-        let (moves, move_count) = controller.game.get_moves();
+        let moves = controller.game.get_moves();
 
-        for board_move in moves.into_iter().take(move_count) {
+        for board_move in moves {
             let move_str = format!("{:?}", board_move); // Adjust this based on your move representation
 
             // Make the move
@@ -188,9 +188,9 @@ mod tests {
             seen_positions.insert(zobrist_key, (current_fen, current_path.clone()));
         }
 
-        let (moves, move_count) = controller.game.get_moves();
+        let moves = controller.game.get_moves();
 
-        for board_move in moves.into_iter().take(move_count) {
+        for board_move in moves {
             let move_str = format!("{:?}", board_move);
 
             controller.game.make_move(board_move);
@@ -304,6 +304,11 @@ mod tests {
     #[test]
     fn test_perft_positions_extreme() {
         test_perft_positions_from_file("data/large.txt", 1, 5);
+    }
+
+    #[test]
+    fn test_perft_positions_full() {
+        test_perft_positions_from_file("data/large.txt", 1, 6);
     }
 
     fn test_perft_positions_from_file(file_path: &str, min_depth: usize, max_depth: usize) {

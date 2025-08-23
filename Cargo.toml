@@ -13,9 +13,16 @@ clap = "4.5.42"
 rayon = "1.10.0"
 fxhash = "0.2.1"
 
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
 [profile.release]
 debug = true
 
 [profile.test]
 inherits = "release"
 debug = true
+
+[[bench]]
+name = "perft"
+harness = false

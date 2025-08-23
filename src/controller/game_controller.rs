@@ -124,7 +124,7 @@ impl GameController {
             .or(long_algebraic_notation.parse::<BoardMove>().ok())
         {
             Some(board_move) => {
-                let (valid_moves, _) = self.game.get_moves();
+                let valid_moves = self.game.get_moves();
 
                 if valid_moves.contains(&board_move) {
                     self.game.make_move(board_move);
@@ -152,9 +152,7 @@ impl GameController {
         let mut move_breakdown = vec![];
 
         // Get all valid moves for the current position
-        let (current_moves, count) = self.game.get_moves();
-
-        for board_move in current_moves.into_iter().take(count) {
+        for board_move in self.game.get_moves() {
             let move_count = self.dfs_count_moves(board_move.clone(), depth, &mut table);
             move_breakdown.push((board_move, move_count));
         }
@@ -181,13 +179,13 @@ impl GameController {
 
         let mut total_count = 0;
 
-        let (current_moves, count) = self.game.get_moves();
+        let current_moves = self.game.get_moves();
 
         // Bulk counting
         if depth == 1 {
-            total_count = count;
+            total_count = current_moves.len();
         } else {
-            for board_move in current_moves.into_iter().take(count) {
+            for board_move in current_moves {
                 total_count += self.dfs_count_moves(board_move, depth - 1, table);
             }
         }

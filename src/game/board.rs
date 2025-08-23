@@ -165,8 +165,6 @@ impl PinData {
 
 pub type PieceBoard = [Option<ColoredPiece>; 64];
 
-const MAX_VALID_MOVES: usize = 256;
-
 #[derive(Debug)]
 pub enum MoveResultType {
     Success,         // successful move
@@ -174,6 +172,113 @@ pub enum MoveResultType {
     InvalidMove,     // invalid move
 
     NoHistory, // can't undo -- no history
+}
+
+pub trait ConstColor {
+    const COLOR: Color;
+    const OPPONENT: Color;
+    const COLOR_INDEX: usize;
+    const OPPONENT_INDEX: usize;
+
+    type Opponent: ConstColor;
+}
+
+pub struct ConstWhite;
+pub struct ConstBlack;
+
+impl ConstColor for ConstWhite {
+    const COLOR: Color = Color::White;
+    const OPPONENT: Color = Color::Black;
+    const COLOR_INDEX: usize = Color::White as usize;
+    const OPPONENT_INDEX: usize = Color::Black as usize;
+
+    type Opponent = ConstBlack;
+}
+
+impl ConstColor for ConstBlack {
+    const COLOR: Color = Color::Black;
+    const OPPONENT: Color = Color::White;
+    const COLOR_INDEX: usize = Color::Black as usize;
+    const OPPONENT_INDEX: usize = Color::White as usize;
+
+    type Opponent = ConstWhite;
+}
+
+pub trait ConstPiece {
+    const PIECE: Piece;
+    const PIECE_INDEX: usize;
+    const IS_SLIDER: bool;
+    const IS_PAWN: bool;
+    const IS_KING: bool;
+}
+
+macro_rules! impl_const_piece {
+    ($struct_name:ident, $piece:expr) => {
+        pub struct $struct_name;
+
+        impl ConstPiece for $struct_name {
+            const PIECE: Piece = $piece;
+            const PIECE_INDEX: usize = $piece as usize;
+            const IS_SLIDER: bool = matches!($piece, Piece::Bishop | Piece::Rook | Piece::Queen);
+            const IS_PAWN: bool = matches!($piece, Piece::Pawn);
+            const IS_KING: bool = matches!($piece, Piece::King);
+        }
+    };
+}
+
+impl_const_piece!(ConstPawn, Piece::Pawn);
+impl_const_piece!(ConstKnight, Piece::Knight);
+impl_const_piece!(ConstBishop, Piece::Bishop);
+impl_const_piece!(ConstRook, Piece::Rook);
+impl_const_piece!(ConstQueen, Piece::Queen);
+impl_const_piece!(ConstKing, Piece::King);
+
+macro_rules! dispatch_piece {
+    ($piece:expr, $func:ident, $game:expr, $($args:expr),*) => {
+        match $piece {
+            Piece::Pawn => $game.$func::<ConstPawn>($($args),*),
+            Piece::Knight => $game.$func::<ConstKnight>($($args),*),
+            Piece::Bishop => $game.$func::<ConstBishop>($($args),*),
+            Piece::Rook => $game.$func::<ConstRook>($($args),*),
+            Piece::Queen => $game.$func::<ConstQueen>($($args),*),
+            Piece::King => $game.$func::<ConstKing>($($args),*),
+        }
+    };
+}
+
+macro_rules! dispatch_piece_color {
+    ($piece:expr, $color:expr, $func:ident, $game:expr, $($args:expr),*) => {
+        match ($piece, $color) {
+            (Piece::Pawn, Color::White) => $game.$func::<ConstPawn, ConstWhite>($($args),*),
+            (Piece::Pawn, Color::Black) => $game.$func::<ConstPawn, ConstBlack>($($args),*),
+            (Piece::Knight, Color::White) => $game.$func::<ConstKnight, ConstWhite>($($args),*),
+            (Piece::Knight, Color::Black) => $game.$func::<ConstKnight, ConstBlack>($($args),*),
+            (Piece::Bishop, Color::White) => $game.$func::<ConstBishop, ConstWhite>($($args),*),
+            (Piece::Bishop, Color::Black) => $game.$func::<ConstBishop, ConstBlack>($($args),*),
+            (Piece::Rook, Color::White) => $game.$func::<ConstRook, ConstWhite>($($args),*),
+            (Piece::Rook, Color::Black) => $game.$func::<ConstRook, ConstBlack>($($args),*),
+            (Piece::Queen, Color::White) => $game.$func::<ConstQueen, ConstWhite>($($args),*),
+            (Piece::Queen, Color::Black) => $game.$func::<ConstQueen, ConstBlack>($($args),*),
+            (Piece::King, Color::White) => $game.$func::<ConstKing, ConstWhite>($($args),*),
+            (Piece::King, Color::Black) => $game.$func::<ConstKing, ConstBlack>($($args),*),
+        }
+    };
+}
+
+macro_rules! for_each_simple_slider {
+    // syntax: for_each_simple_slider!(|Type, PIECE| { ... })
+    (|$T:ident, $piece:ident| $body:block) => {{
+        {
+            type $T = ConstRook;
+            const $piece: Piece = Piece::Rook;
+            $body
+        }
+        {
+            type $T = ConstBishop;
+            const $piece: Piece = Piece::Bishop;
+            $body
+        }
+    }};
 }
 
 #[derive(Debug)]
@@ -187,6 +292,8 @@ pub struct Game {
 
     pub color_bitboards: [Bitboard; Color::COUNT],
     pub piece_bitboards: [Bitboard; Piece::COUNT],
+
+    pub all_pieces: Bitboard,
 
     pub halfmoves: usize,
     pub halfmoves_since_capture: usize,
@@ -216,6 +323,7 @@ impl Game {
             halfmoves: 0,
             history: vec![],
             zobrist_key: 0,
+            all_pieces: Bitboard::default(),
         };
 
         let mut y = 0u32;
@@ -387,21 +495,43 @@ impl Game {
 
         self.piece_bitboards[piece as usize] &= !mask;
         self.color_bitboards[color as usize] &= !mask;
+
         self.pieces[square as usize] = None;
+
+        self.all_pieces = self.color_bitboards[Color::White as usize]
+            | self.color_bitboards[Color::Black as usize];
 
         self.zobrist_key ^= ZOBRIST.pieces[color as usize][piece as usize][square as usize];
     }
 
     fn set_piece(&mut self, square: BoardSquare, colored_piece @ (piece, color): ColoredPiece) {
-        debug_assert!(self.pieces[square as usize].is_none());
-
         let mask = square.to_mask();
 
         self.piece_bitboards[piece as usize] |= mask;
         self.color_bitboards[color as usize] |= mask;
+
         self.pieces[square as usize] = Some(colored_piece);
 
+        self.all_pieces = self.color_bitboards[Color::White as usize]
+            | self.color_bitboards[Color::Black as usize];
+
         self.zobrist_key ^= ZOBRIST.pieces[color as usize][piece as usize][square as usize];
+    }
+
+    fn set_piece_const<P: ConstPiece, C: ConstColor>(&mut self, square: BoardSquare) {
+        debug_assert!(self.pieces[square as usize].is_none());
+
+        let mask = square.to_mask();
+
+        self.piece_bitboards[P::PIECE_INDEX] |= mask;
+        self.color_bitboards[C::COLOR_INDEX] |= mask;
+
+        self.pieces[square as usize] = Some((P::PIECE, C::COLOR));
+
+        self.all_pieces = self.color_bitboards[Color::White as usize]
+            | self.color_bitboards[Color::Black as usize];
+
+        self.zobrist_key ^= ZOBRIST.pieces[C::COLOR_INDEX][P::PIECE_INDEX][square as usize];
     }
 
     fn update_turn(&mut self, delta: isize) {
@@ -433,17 +563,10 @@ impl Game {
     }
 
     ///
-    /// Bitboards for all pieces.
-    ///
-    fn all_pieces_bitboard(&self) -> Bitboard {
-        self.color_bitboards[0] | self.color_bitboards[1]
-    }
-
-    ///
     /// Bitboards for a piece of a given color.
     ///
-    fn colored_piece_bitboard(&self, (piece, color): ColoredPiece) -> Bitboard {
-        self.piece_bitboards[piece as usize] & self.color_bitboards[color as usize]
+    pub fn colored_piece_bitboard_const<P: ConstPiece, C: ConstColor>(&self) -> Bitboard {
+        self.piece_bitboards[P::PIECE_INDEX] & self.color_bitboards[C::COLOR_INDEX]
     }
 
     ///
@@ -453,10 +576,29 @@ impl Game {
         let (board_move, captured_piece, castling_flags, en_passant_bitmap) =
             self.history.pop().unwrap();
 
-        let colored_piece @ (piece, color) = self.pieces[board_move.get_to() as usize].expect(
+        let (piece, color) = self.pieces[board_move.get_to() as usize].expect(
             "No piece at target square when unmaking a move. This should never ever happen.",
         );
 
+        dispatch_piece_color!(
+            piece,
+            color,
+            unmake_move_const,
+            self,
+            board_move,
+            captured_piece,
+            castling_flags,
+            en_passant_bitmap
+        );
+    }
+
+    fn unmake_move_const<P: ConstPiece, C: ConstColor>(
+        &mut self,
+        board_move: BoardMove,
+        captured_piece: Option<(Piece, Color)>,
+        castling_flags: u8,
+        en_passant_bitmap: u64,
+    ) {
         // move the piece back
         self.unset_piece(board_move.get_to());
 
@@ -464,8 +606,8 @@ impl Game {
         self.set_piece(
             board_move.get_from(),
             match board_move.get_promotion() {
-                None => colored_piece,
-                Some(_) => (Piece::Pawn, color),
+                None => (P::PIECE, C::COLOR),
+                Some(_) => (Piece::Pawn, C::COLOR),
             },
         );
 
@@ -479,22 +621,19 @@ impl Game {
         self.update_en_passant_bitmap(en_passant_bitmap);
 
         // uncastle, if the king moved 2 spots; since we're indexing by rows, this should work
-        if piece == Piece::King && board_move.get_from().abs_diff(board_move.get_to()) == 2 {
-            self.set_piece(
-                BoardSquare::from_position(
-                    // bit hack: the to X position is either 2 (0b10) or 6 (0b110),
-                    // so >> gives us a flag whether it's the first or last file
-                    (board_move.get_to().get_x() >> 2) * 7,
-                    board_move.get_from().get_y(),
-                ),
-                (Piece::Rook, color),
-            );
+        if P::PIECE == Piece::King && board_move.get_from().abs_diff(board_move.get_to()) == 2 {
+            self.set_piece_const::<ConstRook, C>(BoardSquare::from_position(
+                // bit hack: the to X position is either 2 (0b10) or 6 (0b110),
+                // so >> gives us a flag whether it's the first or last file
+                (board_move.get_to().get_x() >> 2) * 7,
+                board_move.get_from().get_y(),
+            ));
 
             self.unset_piece((board_move.get_from() + board_move.get_to()) / 2);
         }
 
         // if pawn moves in a cross manner and doesn't capture piece, en-passant happened
-        if piece == Piece::Pawn
+        if P::PIECE == Piece::Pawn
             && captured_piece.is_none()
             && board_move.get_to().get_x() != board_move.get_from().get_x()
         {
@@ -503,7 +642,7 @@ impl Game {
                 board_move.get_from().get_y(),
             );
 
-            self.set_piece(captured_pawn_square, (Piece::Pawn, !color));
+            self.set_piece_const::<ConstPawn, C::Opponent>(captured_pawn_square);
         }
 
         self.update_turn(-1);
@@ -513,11 +652,13 @@ impl Game {
     /// Perform a board move; does NOT check the legality!
     ///
     pub(crate) fn make_move(&mut self, board_move: BoardMove) {
-        let mut promoted = false;
-
-        let (mut piece, color) = self.pieces[board_move.get_from() as usize]
+        let (piece, color) = self.pieces[board_move.get_from() as usize]
             .expect("No piece at the source square while making a move.");
 
+        dispatch_piece_color!(piece, color, make_move_const, self, board_move);
+    }
+
+    fn make_move_const<P: ConstPiece, C: ConstColor>(&mut self, board_move: BoardMove) {
         let captured_piece = self.pieces[board_move.get_to() as usize];
 
         self.history.push((
@@ -528,150 +669,142 @@ impl Game {
         ));
 
         // remove captured piece
-        if captured_piece.is_some() {
+        if let Some((captured, captured_color)) = captured_piece {
             self.unset_piece(board_move.get_to());
 
-            // if we capture rooks, modify the flag of the side whose rook it was
-            //
-            // we kind of need to do this since FEN requires this, and even despite
-            // there could be fuckery with taking rook, promoting and going back
-            if let Some((Piece::Rook, c)) = captured_piece {
+            if captured == Piece::Rook {
                 let castling_flags = self.castling_flags
-                    & !match (c, board_move.get_to()) {
+                    & !match (captured_color, board_move.get_to()) {
                         (Color::Black, BoardSquare::H8) => 0b00000001,
                         (Color::Black, BoardSquare::A8) => 0b00000010,
                         (Color::White, BoardSquare::H1) => 0b00000100,
                         (Color::White, BoardSquare::A1) => 0b00001000,
                         _ => 0,
                     };
-
                 self.update_castling_flags(castling_flags);
             }
         }
 
-        // moves + promotions
+        // remove moving piece
         self.unset_piece(board_move.get_from());
 
-        // if pawn reaches the last rank, promote!
-        if piece == Piece::Pawn
-            && (board_move.get_to().get_y() == 7 || board_move.get_to().get_y() == 0)
-        {
-            piece = board_move
-                .get_promotion()
-                .expect("Pawn move to last rank must contain promotion information.");
+        if P::PIECE == Piece::Pawn {
+            // handle promotion
+            let mut final_piece = P::PIECE;
+            if P::PIECE == Piece::Pawn
+                && (board_move.get_to().get_y() == 7 || board_move.get_to().get_y() == 0)
+            {
+                final_piece = board_move
+                    .get_promotion()
+                    .expect("Pawn move to last rank must contain promotion information.");
+            }
 
-            promoted = true;
+            self.set_piece(board_move.get_to(), (final_piece, C::COLOR));
+        } else {
+            self.set_piece_const::<P, C>(board_move.get_to());
         }
 
-        self.set_piece(board_move.get_to(), (piece, color));
-
-        // if we moved to the en-passant bit, with a pawn, take
-        if piece == Piece::Pawn && self.en_passant_bitmap.is_set(board_move.get_to()) {
+        // en-passant capture
+        if P::PIECE == Piece::Pawn && self.en_passant_bitmap.is_set(board_move.get_to()) {
             self.unset_piece(BoardSquare::from_position(
                 board_move.get_to().get_x(),
                 board_move.get_from().get_y(),
             ))
         }
 
-        // set en-passant bit if pawn went two tiles (i.e. two full rows)
-        self.update_en_passant_bitmap(
-            if piece == Piece::Pawn && board_move.get_from().abs_diff(board_move.get_to()) == 16 {
-                ((board_move.get_from() + board_move.get_to()) / 2).to_mask()
-            } else {
-                0
-            },
-        );
+        // en-passant mark
+        if P::PIECE == Piece::Pawn {
+            self.update_en_passant_bitmap(
+                if board_move.get_from().abs_diff(board_move.get_to()) == 16 {
+                    ((board_move.get_from() + board_move.get_to()) / 2).to_mask()
+                } else {
+                    0
+                },
+            );
+        } else {
+            self.update_en_passant_bitmap(0);
+        }
 
-        // rook moves & castling
-        if piece == Piece::Rook && !promoted {
+        // rook → update castling rights
+        if P::PIECE == Piece::Rook {
             let castling_flags = self.castling_flags
-                & !match (color, board_move.get_from()) {
+                & !match (C::COLOR, board_move.get_from()) {
                     (Color::Black, BoardSquare::H8) => 0b00000001,
                     (Color::Black, BoardSquare::A8) => 0b00000010,
                     (Color::White, BoardSquare::H1) => 0b00000100,
                     (Color::White, BoardSquare::A1) => 0b00001000,
                     _ => 0,
                 };
-
             self.update_castling_flags(castling_flags);
         }
 
-        // king moves
-        if piece == Piece::King {
-            // castling (move by 2)
+        // king special moves
+        if P::PIECE == Piece::King {
             if board_move.get_from().abs_diff(board_move.get_to()) == 2 {
                 self.unset_piece(BoardSquare::from_position(
-                    // bit hack: the to X position is either 2 (0b10) or 6 (0b110),
-                    // so >> gives us a flag whether it's the first or last file
                     (board_move.get_to().get_x() >> 2) * 7,
                     board_move.get_from().get_y(),
                 ));
-
-                self.set_piece(
+                self.set_piece_const::<ConstRook, C>(
                     (board_move.get_from() + board_move.get_to()) / 2,
-                    (Piece::Rook, color),
                 );
             }
-
-            // either way no more castling for this side
-            self.update_castling_flags(self.castling_flags & !(0b11 << (2 * color as usize)));
+            self.update_castling_flags(self.castling_flags & !(0b11 << (2 * C::COLOR_INDEX)));
         }
 
         self.update_turn(1);
     }
 
     ///
-    /// Retrieve a bitboard corresponding to what a sliding piece sees, given a square.
-    /// If blockers is provided, it will be used instead (defaults to all pieces).
+    /// Uses compile-time dispatch based on piece type for better performance.
     ///
-    fn get_occlusion_bitmap(
+    fn get_occlusion_bitmap_const<P: ConstPiece>(
         &self,
         square: BoardSquare,
-        piece: Piece,
         blockers: Option<Bitboard>,
     ) -> Bitboard {
-        match piece {
+        match P::PIECE {
             Piece::Queen => {
                 // Queen moves like both rook and bishop, so combine their attack patterns
-                let rook_attacks = self.get_occlusion_bitmap(square, Piece::Rook, blockers);
-                let bishop_attacks = self.get_occlusion_bitmap(square, Piece::Bishop, blockers);
+                let rook_attacks = self.get_occlusion_bitmap_const::<ConstRook>(square, blockers);
+                let bishop_attacks =
+                    self.get_occlusion_bitmap_const::<ConstBishop>(square, blockers);
                 rook_attacks | bishop_attacks
             }
-            Piece::Rook | Piece::Bishop => {
-                // Original logic for rook and bishop
-                let (possible_blocker_positions_bitboard, offset) = match piece {
-                    Piece::Rook => (MAGIC_ROOK_BLOCKER_BITBOARD[square as usize], 0),
-                    Piece::Bishop => (MAGIC_BISHOP_BLOCKER_BITBOARD[square as usize], 64),
-                    _ => unreachable!(),
-                };
+            Piece::Rook => {
+                let possible_blocker_positions_bitboard =
+                    MAGIC_ROOK_BLOCKER_BITBOARD[square as usize];
+                let key = possible_blocker_positions_bitboard & blockers.unwrap_or(self.all_pieces);
 
-                let key = possible_blocker_positions_bitboard
-                    & blockers.unwrap_or(self.all_pieces_bitboard());
+                let (magic_number, table_offset, bit_offset) = MAGIC_TABLE[square as usize]; // offset 0 for rook
 
-                // then, given the magic table information...
-                let (magic_number, table_offset, bit_offset) =
-                    MAGIC_TABLE[offset + square as usize];
-
-                // ... obtain calculate the blocker bitboard
                 MAGIC_ENTRIES
                     [table_offset + (magic_number.wrapping_mul(key) >> bit_offset) as usize]
             }
-            _ => unreachable!(),
+            Piece::Bishop => {
+                let possible_blocker_positions_bitboard =
+                    MAGIC_BISHOP_BLOCKER_BITBOARD[square as usize];
+                let key = possible_blocker_positions_bitboard & blockers.unwrap_or(self.all_pieces);
+
+                let (magic_number, table_offset, bit_offset) = MAGIC_TABLE[64 + square as usize]; // offset 64 for bishop
+
+                MAGIC_ENTRIES
+                    [table_offset + (magic_number.wrapping_mul(key) >> bit_offset) as usize]
+            }
+            _ => 0,
         }
     }
 
     ///
-    /// Retrieve attack moves for the piece at the particular square.
+    /// Uses compile-time dispatch for both piece type and color.
     ///
-    fn get_piece_attack_bitboard(
+    fn get_piece_attack_bitboard_const<P: ConstPiece, C: ConstColor>(
         &self,
         square: BoardSquare,
-        (piece, color): ColoredPiece,
     ) -> Bitboard {
-        if piece == Piece::Pawn {
-            let result = match color {
-                // the & with the random number prevents 'loop around' attacks
-                // where the pawn attacks on the other side of the board
+        if P::IS_PAWN {
+            // Compile-time pawn attack calculation based on color
+            match C::COLOR {
                 Color::White => {
                     ((1u64.wrapping_shl(square.wrapping_add(9) as u32)) & !0x0101010101010101)
                         | ((1u64.wrapping_shl(square.wrapping_add(7) as u32))
@@ -682,72 +815,79 @@ impl Game {
                         & !(0x0101010101010101 << 7))
                         | ((1u64.wrapping_shl(square.wrapping_sub(7) as u32)) & !0x0101010101010101)
                 }
-            };
-
-            return result;
-        }
-
-        // use pre-calculated attack bitboards for other pieces
-        let mut valid_moves = PIECE_MOVE_BITBOARDS[piece as usize][square as usize];
-
-        match piece {
-            // Slider stuff using magic bitmaps
-            Piece::Bishop | Piece::Rook | Piece::Queen => {
-                valid_moves &= self.get_occlusion_bitmap(square, piece, None);
             }
-            _ => {}
-        }
+        } else {
+            // Use pre-calculated attack bitboards for other pieces
+            let mut valid_moves = PIECE_MOVE_BITBOARDS[P::PIECE_INDEX][square as usize];
 
-        valid_moves
+            if P::IS_SLIDER {
+                // Apply magic bitboard occlusion for sliding pieces
+                valid_moves &= self.get_occlusion_bitmap_const::<P>(square, None);
+            }
+
+            valid_moves
+        }
     }
 
     ///
-    /// Return true/false whether we can kingside/queenside castle for the particular color.
-    /// The piece is king/queen for kingside/queenside castling.
+    /// Returns a bitboard with valid castling squares for the given color.
+    /// Note: This doesn't check if castling into check, as that's handled elsewhere.
     ///
-    /// Note that this will return true when castling into a check, as these are checked later.
-    ///
-    fn can_castle(&self, piece: Piece, color: Color) -> bool {
-        // return false immediately if we can't castle because of castling flags
-        if match (piece, color) {
-            (Piece::King, Color::Black) => 0b0001,
-            (Piece::Queen, Color::Black) => 0b0010,
-            (Piece::King, Color::White) => 0b0100,
-            (Piece::Queen, Color::White) => 0b1000,
-            _ => unreachable!(),
-        } & self.castling_flags
-            == 0
-        {
-            return false;
+    fn get_castling_bitboard_const<C: ConstColor>(&self) -> Bitboard {
+        // Check castling flags at compile time
+        let kingside_flag = if C::COLOR == Color::White {
+            0b0100
+        } else {
+            0b0001
+        };
+        let queenside_flag = if C::COLOR == Color::White {
+            0b1000
+        } else {
+            0b0010
+        };
+
+        let can_kingside = (self.castling_flags & kingside_flag) != 0;
+        let can_queenside = (self.castling_flags & queenside_flag) != 0;
+
+        if !can_kingside && !can_queenside {
+            return 0;
         }
 
-        // we can only castle if there are no blocking pieces
-        // this gives us the blockers in the castling row
-        let castling_blockers = self.all_pieces_bitboard() >> (color as usize ^ 1) * 56;
+        // Get blockers in the castling row
+        let castling_blockers = self.all_pieces >> (C::OPPONENT_INDEX * 56);
 
-        if match piece {
-            Piece::Queen => 0b00001110,
-            Piece::King => 0b01100000,
-            _ => unreachable!(),
-        } & castling_blockers
-            != 0
-        {
-            return false;
+        let mut castling_moves = 0;
+
+        // Check kingside castling
+        if can_kingside && (castling_blockers & 0b01100000) == 0 {
+            // Check if the intermediate square is attacked
+            let intermediate_square = if C::COLOR == Color::White {
+                BoardSquare::F1
+            } else {
+                BoardSquare::F8
+            };
+
+            if !self.is_square_attacked_const::<C::Opponent>(intermediate_square) {
+                castling_moves |= 1 << 6; // G file
+            }
         }
 
-        // since we're already doing destination checks for king moves,
-        // we don't need to check the final resulting position
-        if match (piece, color) {
-            (Piece::Queen, Color::Black) => self.is_square_attacked(BoardSquare::D8, !color),
-            (Piece::King, Color::Black) => self.is_square_attacked(BoardSquare::F8, !color),
-            (Piece::Queen, Color::White) => self.is_square_attacked(BoardSquare::D1, !color),
-            (Piece::King, Color::White) => self.is_square_attacked(BoardSquare::F1, !color),
-            _ => unreachable!(),
-        } {
-            return false;
+        // Check queenside castling
+        if can_queenside && (castling_blockers & 0b00001110) == 0 {
+            // Check if the intermediate square is attacked
+            let intermediate_square = if C::COLOR == Color::White {
+                BoardSquare::D1
+            } else {
+                BoardSquare::D8
+            };
+
+            if !self.is_square_attacked_const::<C::Opponent>(intermediate_square) {
+                castling_moves |= 1 << 2; // C file
+            }
         }
 
-        true
+        // Shift to the correct rank
+        castling_moves << (C::OPPONENT_INDEX * 56)
     }
 
     ///
@@ -756,82 +896,117 @@ impl Game {
     /// current turn (i.e. ignoring `this.side`).
     ///
     fn get_pseudo_legal_move_bitboard(&self, square: BoardSquare) -> Bitboard {
-        let colored_piece @ (piece, color) = self.pieces[square as usize].unwrap();
+        let (piece, color) = self.pieces[square as usize].unwrap();
 
-        // Obtain attack move bitboard, which are also regular moves for all but pawns
-        let mut valid_moves = self.get_piece_attack_bitboard(square, colored_piece);
+        return dispatch_piece_color!(
+            piece,
+            color,
+            get_pseudo_legal_move_bitboard_const,
+            self,
+            square
+        );
+    }
 
-        match piece {
-            // Pawn stuff
-            Piece::Pawn => {
-                // Attack moves only when there is enemy or en-passant
-                valid_moves &= self.color_bitboards[!color as usize] | self.en_passant_bitmap;
+    ///
+    /// Generic const version of get_pseudo_legal_move_bitboard.
+    ///
+    fn get_pseudo_legal_move_bitboard_const<P: ConstPiece, C: ConstColor>(
+        &self,
+        square: BoardSquare,
+    ) -> Bitboard {
+        // Get attack moves (which are also regular moves for all but pawns)
+        let mut valid_moves = self.get_piece_attack_bitboard_const::<P, C>(square);
 
-                // regular moves (not into/through pieces)
-                let forward_move = match color {
-                    Color::White => 1 << (square + 8),
-                    Color::Black => 1 << (square - 8),
-                } & !self.all_pieces_bitboard();
+        if P::IS_PAWN {
+            // Attack moves only when there is enemy or en-passant
+            valid_moves &= self.color_bitboards[C::OPPONENT_INDEX] | self.en_passant_bitmap;
 
-                valid_moves |= forward_move;
+            // Regular forward moves (not into/through pieces)
+            let forward_move = if C::COLOR == Color::White {
+                1 << (square + 8)
+            } else {
+                1 << (square - 8)
+            } & !self.all_pieces;
 
-                // if we can move forward, we can also try double forward
-                if forward_move != 0 {
-                    valid_moves |= match (color, square.get_y()) {
-                        (Color::White, 1) => 1 << (square + 16) | 1 << (square + 8),
-                        (Color::Black, 6) => 1 << (square - 16) | 1 << (square - 8),
-                        _ => 0,
-                    } & !self.all_pieces_bitboard()
+            valid_moves |= forward_move;
+
+            // Double forward move from starting position
+            if forward_move != 0 {
+                let starting_rank = if C::COLOR == Color::White { 1 } else { 6 };
+                if square.get_y() == starting_rank {
+                    let double_forward = if C::COLOR == Color::White {
+                        1 << (square + 16)
+                    } else {
+                        1 << (square - 16)
+                    } & !self.all_pieces;
+
+                    valid_moves |= double_forward;
                 }
             }
-            // King stuff
-            Piece::King => {
-                // only castle if not under attack
-                if !self.is_square_attacked(
-                    self.colored_piece_bitboard((Piece::King, color))
-                        .next_index(),
-                    !color,
-                ) {
-                    valid_moves |= ((self.can_castle(Piece::Queen, color) as u64) << 2
-                        | (self.can_castle(Piece::King, color) as u64) << 6)
-                        << ((color as usize ^ 1) * 56)
-                }
+        } else if P::IS_KING {
+            // Only add castling if king is not under attack
+            let king_position = self
+                .colored_piece_bitboard_const::<ConstKing, C>()
+                .next_index();
+
+            if !self.is_square_attacked_const::<C::Opponent>(king_position) {
+                valid_moves |= self.get_castling_bitboard_const::<C>();
             }
-            _ => {}
         }
 
-        // Can't ever capture / go through own pieces
-        valid_moves &= !self.color_bitboards[color as usize];
+        // Can't capture or move through own pieces
+        valid_moves &= !self.color_bitboards[C::COLOR_INDEX];
 
         valid_moves
     }
 
-    fn get_king_position(&self, color: Color) -> BoardSquare {
-        self.colored_piece_bitboard((Piece::King, color))
+    ///
+    /// Returns the position of the king of a given color.
+    ///
+    fn get_king_position_const<C: ConstColor>(&self) -> BoardSquare {
+        self.colored_piece_bitboard_const::<ConstKing, C>()
             .next_index()
     }
 
     ///
-    /// Return a bitboard of attackers for a particular position.
+    /// Returns a bitboard of all pieces of the given color that can attack the square.
     ///
-    fn get_attacked_from(&self, square: BoardSquare, color: Color) -> Bitboard {
-        Piece::iter().fold(Bitboard::default(), |current, piece| {
-            current
-                | (self.get_piece_attack_bitboard(square, (piece, !color))
-                    & self.colored_piece_bitboard((piece, color)))
-        })
+    fn get_attacked_from_const<C: ConstColor>(&self, square: BoardSquare) -> Bitboard {
+        let pawn_attackers = self.get_piece_attack_bitboard_const::<ConstPawn, C::Opponent>(square)
+            & self.colored_piece_bitboard_const::<ConstPawn, C>();
+
+        let knight_attackers = self
+            .get_piece_attack_bitboard_const::<ConstKnight, C::Opponent>(square)
+            & self.colored_piece_bitboard_const::<ConstKnight, C>();
+
+        let bishop_attackers = self
+            .get_piece_attack_bitboard_const::<ConstBishop, C::Opponent>(square)
+            & self.colored_piece_bitboard_const::<ConstBishop, C>();
+
+        let rook_attackers = self.get_piece_attack_bitboard_const::<ConstRook, C::Opponent>(square)
+            & self.colored_piece_bitboard_const::<ConstRook, C>();
+
+        let queen_attackers = self
+            .get_piece_attack_bitboard_const::<ConstQueen, C::Opponent>(square)
+            & self.colored_piece_bitboard_const::<ConstQueen, C>();
+
+        let king_attackers = self.get_piece_attack_bitboard_const::<ConstKing, C::Opponent>(square)
+            & self.colored_piece_bitboard_const::<ConstKing, C>();
+
+        pawn_attackers
+            | knight_attackers
+            | bishop_attackers
+            | rook_attackers
+            | queen_attackers
+            | king_attackers
     }
 
     ///
     /// Check for the attack on a square by a particular color.
+    /// Const generic version for compile-time color optimization.
     ///
-    fn is_square_attacked(&self, square: BoardSquare, color: Color) -> bool {
-        // pawns are symmetric and other pieces don't care about color, so that's why we negate the color
-        Piece::iter().any(|piece| {
-            self.get_piece_attack_bitboard(square, (piece, !color))
-                & self.colored_piece_bitboard((piece, color))
-                != 0
-        })
+    fn is_square_attacked_const<C: ConstColor>(&self, square: BoardSquare) -> bool {
+        self.get_attacked_from_const::<C>(square) != 0
     }
 
     ///
@@ -868,8 +1043,8 @@ impl Game {
     /// Retrieve pinning information for rook and bishop attacks.
     /// Returns structured data with pinned pieces and their valid move squares.
     ///
-    pub fn get_pinner_bitboards(&self, color: Color) -> PinData {
-        let king_position = self.get_king_position(color);
+    pub fn get_pinner_bitboards_const<C: ConstColor>(&self) -> PinData {
+        let king_position = self.get_king_position_const::<C>();
 
         let mut pin_data = PinData::default();
 
@@ -881,41 +1056,34 @@ impl Game {
         //   |    |    |    |
         //  Kng  (1)  (2)   |
         //
-        for piece in Piece::simple_sliders() {
+        for_each_simple_slider!(|P, piece| {
             let piece_idx = piece as usize;
 
             // (1) get occlusions to get possible pinned pieces
-            let raycast_1 = self.get_occlusion_bitmap(king_position, piece, None);
+            let raycast_1 = self.get_occlusion_bitmap_const::<P>(king_position, None);
 
             // (2) subtract the calculated occlusions from blockers to get the blocked pieces
-            let raycast_2 = self.get_occlusion_bitmap(
-                king_position,
-                piece,
-                Some(self.all_pieces_bitboard() & !raycast_1),
-            );
+            let raycast_2 = self
+                .get_occlusion_bitmap_const::<P>(king_position, Some(self.all_pieces & !raycast_1));
 
             // now we can get a bitmap of the attackers that are pinning things down
             // queen accounts for both rook and bishop so we count it both times
-            let attacker_positions = (self.colored_piece_bitboard((piece, !color))
-                | self.colored_piece_bitboard((Piece::Queen, !color)))
+            let attacker_positions = (self.colored_piece_bitboard_const::<P, C::Opponent>()
+                | self.colored_piece_bitboard_const::<ConstQueen, C::Opponent>())
                 & (raycast_2 & !raycast_1);
 
             // for each of these, calculate the pinned piece by casting back from the attacker
             for attacker_position in attacker_positions.iter_positions() {
                 // (3) cast back from attacker to get the raycast
-                let raycast_3 = self.get_occlusion_bitmap(
+                let raycast_3 = self.get_occlusion_bitmap_const::<P>(
                     attacker_position,
-                    piece,
-                    Some(self.all_pieces_bitboard() & !raycast_1),
+                    Some(self.all_pieces & !raycast_1),
                 );
 
                 // only one pinned pieces
-                debug_assert!(
-                    (raycast_3 & raycast_1 & self.all_pieces_bitboard()).count_ones() == 1
-                );
+                debug_assert!((raycast_3 & raycast_1 & self.all_pieces).count_ones() == 1);
 
-                let pinned_piece_position =
-                    (raycast_3 & raycast_1 & self.all_pieces_bitboard()).next_index();
+                let pinned_piece_position = (raycast_3 & raycast_1 & self.all_pieces).next_index();
 
                 let valid_positions = (raycast_2 & raycast_3) | (1 << attacker_position);
 
@@ -931,7 +1099,7 @@ impl Game {
                 pin_data.pins[piece_idx][pin_data.pin_counts[piece_idx]] = pin_info;
                 pin_data.pin_counts[piece_idx] += 1;
             }
-        }
+        });
 
         pin_data
     }
@@ -940,32 +1108,33 @@ impl Game {
     /// Retrieve attack information when the king is under exactly one attack.
     /// Returns the attack bitmap (ray from attacker to king) for blocking moves,
     /// plus the attacker position for capture moves.
+    /// Const generic version for compile-time color optimization.
     ///
-    pub fn get_single_slider_attack_data(&self, position: BoardSquare, color: Color) -> Bitboard {
+    pub fn get_single_slider_attack_data_const<C: ConstColor>(
+        &self,
+        position: BoardSquare,
+    ) -> Bitboard {
         // Check all slider pieces that could be attacking the king
-        for piece in Piece::simple_sliders() {
+        for_each_simple_slider!(|P, piece| {
             // (1) Raycast from king to find potential attackers
-            let raycast_from_king = self.get_occlusion_bitmap(position, piece, None);
+            let raycast_from_king = self.get_occlusion_bitmap_const::<P>(position, None);
 
             // Find enemy sliders (including queens) that could attack along this ray
-            let potential_attackers = (self.colored_piece_bitboard((piece, !color))
-                | self.colored_piece_bitboard((Piece::Queen, !color)))
+            let potential_attackers = (self.colored_piece_bitboard_const::<P, C::Opponent>()
+                | self.colored_piece_bitboard_const::<ConstQueen, C::Opponent>())
                 & raycast_from_king;
 
             // Check each potential attacker
             for attacker_position in potential_attackers.iter_positions() {
                 // (2) Raycast back from attacker to king with current board state
-                let raycast_from_attacker = self.get_occlusion_bitmap(
-                    attacker_position,
-                    piece,
-                    Some(self.all_pieces_bitboard()),
-                );
+                let raycast_from_attacker =
+                    self.get_occlusion_bitmap_const::<P>(attacker_position, Some(self.all_pieces));
 
                 // Valid positions to block are the rays between the attacker and the king,
                 // and the attacker position
                 return (raycast_from_attacker & raycast_from_king) | attacker_position.to_mask();
             }
-        }
+        });
 
         panic!("No slider attacks found for king");
     }
@@ -980,12 +1149,13 @@ impl Game {
     ///
     /// When under an attack by a rook like this, it should not move back,
     /// even though the square behind the king is not under attack.
-    fn add_king_evade_or_capture_moves(
+    /// Const generic version for compile-time color optimization.
+    ///
+    fn add_king_evade_or_capture_moves_const<C: ConstColor>(
         &self,
         king_position: BoardSquare,
         king_attacks: Bitboard,
-        resulting_positions: &mut [BoardMove],
-        count: &mut usize,
+        moves: &mut Vec<BoardMove>,
     ) {
         // we need to collect bitboards of attacking sliders, as king could otherwise
         // move "away" from them, which is technically a safe square
@@ -994,42 +1164,44 @@ impl Game {
         for position in king_attacks.iter_positions() {
             let (piece, _) = self.pieces[position as usize].unwrap();
 
-            if piece.is_slider() {
-                slider_attack_bitboard |= self.get_occlusion_bitmap(
-                    position,
-                    piece,
-                    Some(self.all_pieces_bitboard() & !king_position.to_mask()),
-                )
-            }
+            slider_attack_bitboard |= dispatch_piece!(
+                piece,
+                get_occlusion_bitmap_const,
+                self,
+                position,
+                Some(self.all_pieces & !king_position.to_mask())
+            );
         }
 
         // now we can only move to spots that are not attacked by the sliders
         for board_move in
             self.get_square_pseudo_legal_moves(king_position, Some(!slider_attack_bitboard))
         {
-            if !self.is_square_attacked(board_move.get_to(), !self.side) {
-                resulting_positions[*count] = board_move;
-                *count += 1;
+            // Check if the destination square is attacked by the opponent
+
+            let is_attacked = self.is_square_attacked_const::<C::Opponent>(board_move.get_to());
+            if !is_attacked {
+                moves.push(board_move);
             }
         }
     }
 
     ///
     /// Obtain a list of valid moves for the current position.
+    /// Const generic version for compile-time color optimization.
     ///
-    pub fn get_moves(&self) -> ([BoardMove; MAX_VALID_MOVES], usize) {
-        let mut resulting_positions = [BoardMove::default(); MAX_VALID_MOVES];
-        let mut count = 0;
+    pub fn get_moves_const<C: ConstColor>(&self) -> Vec<BoardMove> {
+        let mut moves = Vec::with_capacity(64); // Most positions have < 40 moves
 
-        let king_position = self.get_king_position(self.side);
-        let king_attacks = self.get_attacked_from(king_position, !self.side);
+        let king_position = self.get_king_position_const::<C>();
+        let king_attacks = self.get_attacked_from_const::<C::Opponent>(king_position);
 
         if king_attacks.count_ones() == 0 {
             // king is not under attack, so just move but not into a pin
-            let pin_data = self.get_pinner_bitboards(self.side);
+            let pin_data = self.get_pinner_bitboards_const::<C>();
 
             // for non-king pieces, make them move
-            for square in (self.color_bitboards[self.side as usize] & !king_position.to_mask())
+            for square in (self.color_bitboards[C::COLOR as usize] & !king_position.to_mask())
                 .iter_positions()
             {
                 // Get pin mask for this square if it's pinned
@@ -1049,22 +1221,21 @@ impl Game {
                         );
 
                         // Simulate the board state after en passant (both pawns removed)
-                        let simulated_blockers = self.all_pieces_bitboard()
+                        let simulated_blockers = self.all_pieces
                             & !square.to_mask() // Remove moving pawn
                             & !captured_pawn_square.to_mask() // Remove captured pawn
                             | board_move.get_to().to_mask(); // Add pawn at destination
 
                         // Check if this exposes the king to a rook/queen attack along the rank
-                        let rook_attacks = self.get_occlusion_bitmap(
+                        let rook_attacks = self.get_occlusion_bitmap_const::<ConstRook>(
                             king_position,
-                            Piece::Rook,
                             Some(simulated_blockers),
                         );
 
                         // Check if any enemy rooks or queens can now attack the king
                         let enemy_rook_queens = (self
-                            .colored_piece_bitboard((Piece::Rook, !moving_color))
-                            | self.colored_piece_bitboard((Piece::Queen, !moving_color)))
+                            .colored_piece_bitboard_const::<ConstRook, C::Opponent>()
+                            | self.colored_piece_bitboard_const::<ConstQueen, C::Opponent>())
                             & rook_attacks;
 
                         if enemy_rook_queens != 0 {
@@ -1072,30 +1243,28 @@ impl Game {
                         }
                     }
 
-                    resulting_positions[count] = board_move;
-                    count += 1;
+                    moves.push(board_move);
                 }
             }
 
             // for king, just don't move into an attack
             for board_move in self.get_square_pseudo_legal_moves(king_position, None) {
-                if !self.is_square_attacked(board_move.get_to(), !self.side) {
-                    resulting_positions[count] = board_move;
-                    count += 1;
+                if !self.is_square_attacked_const::<C::Opponent>(board_move.get_to()) {
+                    moves.push(board_move);
                 }
             }
         } else if king_attacks.count_ones() == 1 {
             // king is under one attack -- he can
             //  - block with an unpinned piece / take the attacker
             //  - evade
-            let pin_data = self.get_pinner_bitboards(self.side);
+            let pin_data = self.get_pinner_bitboards_const::<C>();
 
             let attacking_position = king_attacks.next_index();
             let (attacking_piece, _) = self.pieces[attacking_position as usize].unwrap();
 
             // go through all non-king pieces
-            for square in (self.color_bitboards[self.side as usize] & !king_position.to_mask())
-                .iter_positions()
+            for square in
+                (self.color_bitboards[C::COLOR_INDEX] & !king_position.to_mask()).iter_positions()
             {
                 // Get pin mask for this square if it's pinned
                 let pin_mask = pin_data.get_pin_mask_for_square(square);
@@ -1108,13 +1277,15 @@ impl Game {
                     if attacking_piece == Piece::Pawn
                         && moving_piece == Piece::Pawn
                         && (self.en_passant_bitmap
-                            & self.get_piece_attack_bitboard(square, (moving_piece, moving_color)))
+                            & self.get_piece_attack_bitboard_const::<ConstPawn, C>(square))
                             & pin_mask.unwrap_or(!0)
                             != 0
                     {
-                        resulting_positions[count] =
-                            BoardMove::new(square, self.en_passant_bitmap.next_index(), None);
-                        count += 1;
+                        moves.push(BoardMove::new(
+                            square,
+                            self.en_passant_bitmap.next_index(),
+                            None,
+                        ));
                         continue;
                     }
 
@@ -1122,39 +1293,42 @@ impl Game {
                         square,
                         Some(attacking_position.to_mask() & pin_mask.unwrap_or(!0)),
                     ) {
-                        resulting_positions[count] = board_move;
-                        count += 1;
+                        moves.push(board_move);
                     }
                 } else {
                     // If it is a slider, we can either take, or block
-                    let attack_data = self.get_single_slider_attack_data(king_position, self.side);
+                    let attack_data = self.get_single_slider_attack_data_const::<C>(king_position);
 
                     for board_move in self.get_square_pseudo_legal_moves(
                         square,
                         Some(attack_data & pin_mask.unwrap_or(!0)),
                     ) {
-                        resulting_positions[count] = board_move;
-                        count += 1;
+                        moves.push(board_move);
                     }
                 }
             }
 
-            self.add_king_evade_or_capture_moves(
+            self.add_king_evade_or_capture_moves_const::<C>(
                 king_position,
                 king_attacks,
-                &mut resulting_positions,
-                &mut count,
+                &mut moves,
             );
         } else {
             // can only evade if we have multiple attacks
-            self.add_king_evade_or_capture_moves(
+            self.add_king_evade_or_capture_moves_const::<C>(
                 king_position,
                 king_attacks,
-                &mut resulting_positions,
-                &mut count,
+                &mut moves,
             );
         }
 
-        (resulting_positions, count)
+        moves
+    }
+
+    pub fn get_moves(&self) -> Vec<BoardMove> {
+        match self.side {
+            Color::White => self.get_moves_const::<ConstWhite>(),
+            Color::Black => self.get_moves_const::<ConstBlack>(),
+        }
     }
 }
