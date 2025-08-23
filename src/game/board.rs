@@ -3,8 +3,8 @@ use crate::game::ColoredPiece;
 use crate::utils::Bitboard;
 use crate::zobris::ZOBRIST;
 use crate::{
-    BitboardExt, BoardSquare, BoardSquareExt, MAGIC_BLOCKER_BITBOARD, MAGIC_ENTRIES, MAGIC_TABLE,
-    PIECE_MOVE_BITBOARDS,
+    BLACK_PROMOTION_ROW, BitboardExt, BoardSquare, BoardSquareExt, MAGIC_BLOCKER_BITBOARD,
+    MAGIC_ENTRIES, MAGIC_TABLE, PIECE_MOVE_BITBOARDS, WHITE_PROMOTION_ROW,
 };
 use strum::EnumCount;
 
@@ -12,6 +12,8 @@ pub type BoardMove = u16;
 
 pub trait BoardMoveExt {
     fn new(from: BoardSquare, to: BoardSquare, promotion: Option<Piece>) -> BoardMove;
+    fn regular(from: BoardSquare, to: BoardSquare) -> BoardMove;
+    fn promoting(from: BoardSquare, to: BoardSquare, promotion: Piece) -> BoardMove;
     fn get_from(&self) -> BoardSquare;
     fn get_to(&self) -> BoardSquare;
     fn get_promotion(&self) -> Option<Piece>;
@@ -27,6 +29,14 @@ impl BoardMoveExt for u16 {
                 .and_then(|p| Some(1 << (p as u16)))
                 .unwrap_or_default())
                 << 12)
+    }
+
+    fn regular(from: BoardSquare, to: BoardSquare) -> BoardMove {
+        (from as u16) | ((to as u16) << 6)
+    }
+
+    fn promoting(from: BoardSquare, to: BoardSquare, promotion: Piece) -> BoardMove {
+        (from as u16) | ((to as u16) << 6) | ((1 << (promotion as u16)) << 12)
     }
 
     fn get_from(&self) -> BoardSquare {
@@ -77,132 +87,6 @@ impl BoardMoveExt for u16 {
                 .and_then(|p| Some(p.to_char().to_string()))
                 .unwrap_or("".to_string())
         )
-    }
-}
-
-pub struct ValidMovesIterator {
-    bitboard: Bitboard,
-    square: BoardSquare,
-
-    is_promoting: bool,
-    current_promotion: usize,
-}
-
-impl Iterator for ValidMovesIterator {
-    type Item = BoardMove;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        // out of moves!
-        if self.bitboard == 0 {
-            return None;
-        }
-
-        let to_square = self.bitboard.next_index();
-
-        if self.is_promoting {
-            let result = Some(BoardMove::new(
-                self.square,
-                to_square,
-                Piece::from_repr(self.current_promotion),
-            ));
-
-            self.current_promotion += 1;
-
-            if self.current_promotion == 4 {
-                self.bitboard &= self.bitboard - 1;
-                self.current_promotion = 0;
-            }
-
-            result
-        } else {
-            self.bitboard &= self.bitboard - 1;
-
-            Some(BoardMove::new(self.square.clone(), to_square, None))
-        }
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        let count = self.bitboard.count_ones() as usize;
-        (count, Some(count))
-    }
-}
-
-pub struct PieceMovesIterator {
-    bitboard: Bitboard,
-    square: BoardSquare,
-}
-
-impl PieceMovesIterator {
-    pub fn new(bitboard: Bitboard, square: BoardSquare) -> Self {
-        Self { bitboard, square }
-    }
-}
-
-impl Iterator for PieceMovesIterator {
-    type Item = BoardMove;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.bitboard == 0 {
-            return None;
-        }
-
-        let to_square = self.bitboard.next_index();
-        self.bitboard &= self.bitboard - 1;
-
-        Some(BoardMove::new(self.square.clone(), to_square, None))
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        let count = self.bitboard.count_ones() as usize;
-        (count, Some(count))
-    }
-}
-
-pub struct PromotingMovesIterator {
-    bitboard: Bitboard,
-    square: BoardSquare,
-    current_promotion: usize,
-}
-
-impl PromotingMovesIterator {
-    pub fn new(bitboard: Bitboard, square: BoardSquare) -> Self {
-        Self {
-            bitboard,
-            square,
-            current_promotion: 0,
-        }
-    }
-}
-
-impl Iterator for PromotingMovesIterator {
-    type Item = BoardMove;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.bitboard == 0 {
-            return None;
-        }
-
-        let to_square = self.bitboard.next_index();
-
-        let result = Some(BoardMove::new(
-            self.square,
-            to_square,
-            Piece::from_repr(self.current_promotion),
-        ));
-
-        self.current_promotion += 1;
-
-        if self.current_promotion == 4 {
-            self.bitboard &= self.bitboard - 1;
-            self.current_promotion = 0;
-        }
-
-        result
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        let count = self.bitboard.count_ones() as usize * 4; // 4 promotion pieces per square
-        (count, Some(count))
     }
 }
 
@@ -321,17 +205,6 @@ macro_rules! dispatch_piece {
             Piece::Rook => $game.$func::<ConstRook>($($args),*),
             Piece::Queen => $game.$func::<ConstQueen>($($args),*),
             Piece::King => $game.$func::<ConstKing>($($args),*),
-        }
-    };
-}
-
-macro_rules! dispatch_slider {
-    ($piece:expr, $func:ident, $game:expr, $($args:expr),*) => {
-        match $piece {
-            Piece::Bishop => $game.$func::<ConstBishop>($($args),*),
-            Piece::Rook => $game.$func::<ConstRook>($($args),*),
-            Piece::Queen => $game.$func::<ConstQueen>($($args),*),
-            _ => unreachable!()
         }
     };
 }
@@ -974,6 +847,8 @@ impl Game {
     /// ignoring most safety-related rules and using the color of the piece as the
     /// current turn (i.e. ignoring `this.side`).
     ///
+    /// TODO: this should have <C>
+    ///
     fn get_pseudo_legal_move_bitboard(&self, square: BoardSquare) -> Bitboard {
         let (piece, color) = self.pieces[square as usize].unwrap();
 
@@ -1090,32 +965,6 @@ impl Game {
     }
 
     ///
-    /// Return valid moves for a particular square, masked by a bitmap.
-    ///
-    pub fn get_square_pseudo_legal_moves(
-        &self,
-        square: BoardSquare,
-        valid_move_mask: Bitboard,
-    ) -> ValidMovesIterator {
-        let mut bitboard = self.get_pseudo_legal_move_bitboard(square);
-        bitboard &= valid_move_mask;
-
-        // pawn on second to last rank must promote on the last rank
-        let is_promoting = self.pieces[square as usize].is_some_and(|(p, c)| {
-            p == Piece::Pawn
-                && (square.get_y() == 6 && c == Color::White
-                    || square.get_y() == 1 && c == Color::Black)
-        });
-
-        ValidMovesIterator {
-            square: square.clone(),
-            bitboard,
-            is_promoting,
-            current_promotion: 0,
-        }
-    }
-
-    ///
     /// Retrieve pinning information for rook and bishop attacks.
     /// Returns structured data with pinned pieces and their valid move squares.
     ///
@@ -1182,7 +1031,6 @@ impl Game {
     /// Retrieve attack information when the king is under exactly one attack.
     /// Returns the attack bitmap (ray from attacker to king) for blocking moves,
     /// plus the attacker position for capture moves.
-    /// Const generic version for compile-time color optimization.
     ///
     pub fn get_single_slider_attack_data_const<C: ConstColor>(
         &self,
@@ -1223,7 +1071,6 @@ impl Game {
     ///
     /// When under an attack by a rook like this, it should not move back,
     /// even though the square behind the king is not under attack.
-    /// Const generic version for compile-time color optimization.
     ///
     fn add_king_evade_or_capture_moves_const<C: ConstColor>(
         &self,
@@ -1252,17 +1099,79 @@ impl Game {
             .get_pseudo_legal_move_bitboard_const::<ConstKing, C>(king_position)
             & !slider_attack_bitboard;
 
-        for board_move in PieceMovesIterator::new(legal_move_bitboard, king_position) {
-            // now we can only move to spots that are not attacked by the sliders
-            if !self.is_square_attacked_const::<C::Opponent>(board_move.get_to()) {
-                moves.push(board_move);
+        for target in legal_move_bitboard.iter_positions() {
+            if !self.is_square_attacked_const::<C::Opponent>(target) {
+                moves.push(BoardMove::regular(king_position, target));
             }
+        }
+    }
+
+    fn check_discovered_en_passant_attack<C: ConstColor>(
+        &self,
+        square: BoardSquare,
+        king_position: BoardSquare,
+    ) -> bool {
+        if square.get_y() == king_position.get_y() {
+            let target = self.en_passant_bitmap.next_index();
+
+            // En passant capture - need to check for horizontal discovered attacks
+            let captured_pawn_square = BoardSquare::from_position(target.get_x(), square.get_y());
+
+            // Simulate the board state after en passant (both pawns removed)
+            let simulated_blockers = self.all_pieces
+                & !square.to_mask() // Remove moving pawn
+                & !captured_pawn_square.to_mask() // Remove captured pawn
+                | target.to_mask(); // Add pawn at destination
+
+            // Check if this exposes the king to a rook/queen attack along the rank
+            let rook_attacks =
+                self.get_occlusion_bitmap_const::<ConstRook>(king_position, simulated_blockers);
+
+            // Check if any enemy rooks or queens can now attack the king
+            let enemy_rook_queens = (self.colored_piece_bitboard_const::<ConstRook, C::Opponent>()
+                | self.colored_piece_bitboard_const::<ConstQueen, C::Opponent>())
+                & rook_attacks;
+
+            if enemy_rook_queens != 0 {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    fn add_regular_moves(
+        &self,
+        source: BoardSquare,
+        mut target_bitboard: Bitboard,
+        moves: &mut Vec<BoardMove>,
+    ) {
+        while target_bitboard != 0 {
+            let target = target_bitboard.next_index();
+            moves.push(BoardMove::regular(source, target));
+            target_bitboard &= !target.to_mask();
+        }
+    }
+
+    fn add_promotion_moves(
+        &self,
+        source: BoardSquare,
+        mut target_bitboard: Bitboard,
+        moves: &mut Vec<BoardMove>,
+    ) {
+        while target_bitboard != 0 {
+            let target = target_bitboard.next_index();
+
+            for promotion_piece in [Piece::Queen, Piece::Rook, Piece::Bishop, Piece::Knight] {
+                moves.push(BoardMove::promoting(source, target, promotion_piece));
+            }
+
+            target_bitboard &= !target.to_mask();
         }
     }
 
     ///
     /// Obtain a list of valid moves for the current position.
-    /// Const generic version for compile-time color optimization.
     ///
     pub fn get_moves_const<C: ConstColor>(&self) -> Vec<BoardMove> {
         let mut moves = Vec::with_capacity(64); // Most positions have < 40 moves
@@ -1271,60 +1180,92 @@ impl Game {
         let king_attacks = self.get_attacked_from_const::<C::Opponent>(king_position);
 
         if king_attacks.count_ones() == 0 {
-            // king is not under attack, so just move but not into a pin
+            // king is not under attack, so just move regularly, but not into a pin
             let pin_data = self.get_pinner_bitboards_const::<C>();
 
-            // for non-king pieces, make them move
-            for square in (self.color_bitboards[C::COLOR as usize] & !king_position.to_mask())
-                .iter_positions()
+            let non_king_pieces_to_move_bitboard =
+                self.color_bitboards[C::COLOR as usize] & !king_position.to_mask();
+
+            let pawns_to_move_bitboard = non_king_pieces_to_move_bitboard
+                & self.colored_piece_bitboard_const::<ConstPawn, C>();
+
+            // for non-pawn pieces, just move
+            for square in
+                (non_king_pieces_to_move_bitboard & !pawns_to_move_bitboard).iter_positions()
             {
-                // Get pin mask for this square if it's pinned
                 let pin_mask = pin_data.get_pin_mask_for_square(square);
+                let pseudo_legal_move_bitboard = self.get_pseudo_legal_move_bitboard(square);
 
-                let (moving_piece, moving_color) = self.pieces[square as usize].unwrap();
+                self.add_regular_moves(square, pseudo_legal_move_bitboard & pin_mask, &mut moves);
+            }
 
-                for board_move in self.get_square_pseudo_legal_moves(square, pin_mask) {
-                    if moving_piece == Piece::Pawn
-                        && self.en_passant_bitmap != 0
-                        && board_move.get_to() == self.en_passant_bitmap.next_index()
-                    {
-                        // En passant capture - need to check for horizontal discovered attacks
-                        let captured_pawn_square = BoardSquare::from_position(
-                            board_move.get_to().get_x(),
-                            square.get_y(), // Same rank as moving pawn
-                        );
+            // for pawns, we have special rules because en-passant sucks
+            let promotion_mask = if C::COLOR == Color::White {
+                WHITE_PROMOTION_ROW
+            } else {
+                BLACK_PROMOTION_ROW
+            };
 
-                        // Simulate the board state after en passant (both pawns removed)
-                        let simulated_blockers = self.all_pieces
-                            & !square.to_mask() // Remove moving pawn
-                            & !captured_pawn_square.to_mask() // Remove captured pawn
-                            | board_move.get_to().to_mask(); // Add pawn at destination
+            // TODO: this is too much repeated code, refactor because ewwwwwwwww
+            for square in
+                (non_king_pieces_to_move_bitboard & pawns_to_move_bitboard & promotion_mask)
+                    .iter_positions()
+            {
+                let pin_mask = pin_data.get_pin_mask_for_square(square);
+                let pseudo_legal_move_bitboard =
+                    self.get_pseudo_legal_move_bitboard_const::<ConstPawn, C>(square);
 
-                        // Check if this exposes the king to a rook/queen attack along the rank
-                        let rook_attacks = self.get_occlusion_bitmap_const::<ConstRook>(
-                            king_position,
-                            simulated_blockers,
-                        );
+                let legal_move_bitboard = pseudo_legal_move_bitboard & pin_mask;
 
-                        // Check if any enemy rooks or queens can now attack the king
-                        let enemy_rook_queens = (self
-                            .colored_piece_bitboard_const::<ConstRook, C::Opponent>()
-                            | self.colored_piece_bitboard_const::<ConstQueen, C::Opponent>())
-                            & rook_attacks;
+                self.add_promotion_moves(
+                    square,
+                    legal_move_bitboard & !self.en_passant_bitmap,
+                    &mut moves,
+                );
 
-                        if enemy_rook_queens != 0 {
-                            continue; // Skip this move as it would expose the king
+                if (legal_move_bitboard & self.en_passant_bitmap) != 0 {
+                    let target = self.en_passant_bitmap.next_index();
+
+                    if !self.check_discovered_en_passant_attack::<C>(square, king_position) {
+                        for promotion_piece in
+                            [Piece::Queen, Piece::Rook, Piece::Bishop, Piece::Knight]
+                        {
+                            moves.push(BoardMove::promoting(square, target, promotion_piece));
                         }
                     }
+                }
+            }
 
-                    moves.push(board_move);
+            for square in
+                (non_king_pieces_to_move_bitboard & pawns_to_move_bitboard & !promotion_mask)
+                    .iter_positions()
+            {
+                let pin_mask = pin_data.get_pin_mask_for_square(square);
+                let pseudo_legal_move_bitboard =
+                    self.get_pseudo_legal_move_bitboard_const::<ConstPawn, C>(square);
+
+                let legal_move_bitboard = pseudo_legal_move_bitboard & pin_mask;
+
+                self.add_regular_moves(
+                    square,
+                    legal_move_bitboard & !self.en_passant_bitmap,
+                    &mut moves,
+                );
+
+                if (legal_move_bitboard & self.en_passant_bitmap) != 0 {
+                    let target = self.en_passant_bitmap.next_index();
+
+                    if !self.check_discovered_en_passant_attack::<C>(square, king_position) {
+                        moves.push(BoardMove::regular(square, target));
+                    }
                 }
             }
 
             // for king, just don't move into an attack
-            for board_move in self.get_square_pseudo_legal_moves(king_position, !0) {
-                if !self.is_square_attacked_const::<C::Opponent>(board_move.get_to()) {
-                    moves.push(board_move);
+            let bitboard = self.get_pseudo_legal_move_bitboard_const::<ConstKing, C>(king_position);
+            for target in bitboard.iter_positions() {
+                if !self.is_square_attacked_const::<C::Opponent>(target) {
+                    moves.push(BoardMove::regular(king_position, target));
                 }
             }
         } else if king_attacks.count_ones() == 1 {
@@ -1343,10 +1284,12 @@ impl Game {
                 // Get pin mask for this square if it's pinned
                 let pin_mask = pin_data.get_pin_mask_for_square(square);
 
-                if !attacking_piece.is_slider() {
-                    // If it's not a slider, all we can do is take it, so combine pins with its square
-                    let (moving_piece, moving_color) = self.pieces[square as usize].unwrap();
+                let mut resulting_bitboard = Bitboard::default();
 
+                // If it's not a slider, all we can do is take it, so combine pins with its square
+                let (moving_piece, moving_color) = self.pieces[square as usize].unwrap();
+
+                if !attacking_piece.is_slider() {
                     // There is a special bullshit case where a pawn attacks a king and we can take it via en-passant
                     if attacking_piece == Piece::Pawn
                         && moving_piece == Piece::Pawn
@@ -1355,29 +1298,35 @@ impl Game {
                             & pin_mask
                             != 0
                     {
-                        moves.push(BoardMove::new(
+                        moves.push(BoardMove::regular(
                             square,
                             self.en_passant_bitmap.next_index(),
-                            None,
                         ));
                         continue;
                     }
 
-                    for board_move in self.get_square_pseudo_legal_moves(
-                        square,
-                        attacking_position.to_mask() & pin_mask,
-                    ) {
-                        moves.push(board_move);
-                    }
+                    resulting_bitboard = self.get_pseudo_legal_move_bitboard(square)
+                        & attacking_position.to_mask()
+                        & pin_mask;
                 } else {
                     // If it is a slider, we can either take, or block
                     let attack_data = self.get_single_slider_attack_data_const::<C>(king_position);
 
-                    for board_move in
-                        self.get_square_pseudo_legal_moves(square, attack_data & pin_mask)
-                    {
-                        moves.push(board_move);
-                    }
+                    resulting_bitboard =
+                        self.get_pseudo_legal_move_bitboard(square) & attack_data & pin_mask;
+                }
+
+                // for pawns, we have special rules because en-passant sucks
+                let promotion_mask = if C::COLOR == Color::White {
+                    WHITE_PROMOTION_ROW
+                } else {
+                    BLACK_PROMOTION_ROW
+                };
+
+                if moving_piece == Piece::Pawn && (square.to_mask() & promotion_mask) != 0 {
+                    self.add_promotion_moves(square, resulting_bitboard, &mut moves);
+                } else {
+                    self.add_regular_moves(square, resulting_bitboard, &mut moves);
                 }
             }
 

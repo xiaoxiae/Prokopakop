@@ -156,6 +156,9 @@ pub trait BoardSquareExt {
     const H8: BoardSquare = 63;
 }
 
+pub const WHITE_PROMOTION_ROW: Bitboard = 0x00FF_0000_0000_0000; // 8th rank
+pub const BLACK_PROMOTION_ROW: Bitboard = 0x0000_0000_0000_FF00; // 1st rank
+
 impl BoardSquareExt for u8 {
     fn get_x(&self) -> u8 {
         self % 8
