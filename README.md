@@ -2,6 +2,12 @@
 
 A moderately fast chess engine written in Rust that **kops the Prokop**.
 
+
+<figure>
+    <img src="scripts/plots/nps_plot.png" alt="Performance Across Commits" width="100%">
+    <figcaption><em>Performance benchmarks across git commits on a i9-14900K. Benchmarks use perft 5, hashing and bulk-counting.</em></figcaption>
+</figure>
+
 ## Technical Features
 
 - **[Magic Bitboards](https://www.chessprogramming.org/Magic_Bitboards)** - Fast sliding piece move generation
