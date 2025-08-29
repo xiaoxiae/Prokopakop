@@ -68,10 +68,6 @@ impl Piece {
         }
     }
 
-    pub fn simple_sliders() -> [Piece; 2] {
-        [Piece::Bishop, Piece::Rook]
-    }
-
     pub fn is_slider(&self) -> bool {
         // We change the color via Ansi codes
         match self {

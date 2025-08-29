@@ -1,7 +1,7 @@
-use crate::game::{Color, Piece};
+use crate::game::pieces::{Color, Piece};
 use strum::EnumCount;
 
-pub struct LCG {
+struct LCG {
     state: u64,
 }
 
@@ -21,7 +21,7 @@ impl LCG {
     }
 }
 
-pub struct ZobristKeys {
+pub(crate) struct ZobristKeys {
     pub pieces: [[[u64; 64]; Piece::COUNT]; Color::COUNT],
     pub castling: [u64; 16],
     pub en_passant: [u64; 8 + 1], // [0] no state
@@ -80,4 +80,4 @@ impl ZobristKeys {
     }
 }
 
-pub static ZOBRIST: ZobristKeys = ZobristKeys::new();
+pub(crate) static ZOBRIST_TABLE: ZobristKeys = ZobristKeys::new();

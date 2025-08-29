@@ -1,6 +1,5 @@
+#![allow(dead_code)]
 pub mod controller;
-pub mod game;
-pub mod utils;
 
-pub use crate::controller::*;
-pub use crate::utils::*;
+mod game;
+mod utils;

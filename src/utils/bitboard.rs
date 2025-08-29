@@ -1,4 +1,5 @@
-use crate::game::{Color, Piece};
+use crate::game::pieces::Piece;
+use crate::utils::square::{BoardSquare, BoardSquareExt};
 use rand::RngCore;
 use rayon::prelude::*;
 use std::fs::File;
@@ -7,22 +8,23 @@ use std::path::Path;
 use strum::EnumCount;
 
 pub type Bitboard = u64;
-pub type BoardSquare = u8;
 
-pub trait BitboardExt {
+pub(crate) trait BitboardExt {
     fn next_index(&self) -> BoardSquare;
     fn is_set(&self, index: BoardSquare) -> bool;
-    fn print(&self, title: Option<&str>, position: Option<BoardSquare>);
     fn iter_positions(&self) -> BitboardIterator;
+
+    #[allow(dead_code)]
+    fn print(&self, title: Option<&str>, position: Option<BoardSquare>);
 }
 
 // used like this because we can't have a const fn as a trait,
 // but we want to use it for the compile-time bitmap calculation
-pub const fn position_to_bitmask(x: u32, y: u32) -> u64 {
+const fn position_to_bitmask(x: u32, y: u32) -> u64 {
     1u64 << x + y * 8
 }
 
-pub const fn is_position_valid(x: isize, y: isize) -> bool {
+const fn is_position_valid(x: isize, y: isize) -> bool {
     x >= 0 && x < 8 && y >= 0 && y < 8
 }
 
@@ -73,130 +75,10 @@ impl BitboardExt for u64 {
         BitboardIterator { remaining: *self }
     }
 }
+pub(crate) const WHITE_PROMOTION_ROW: Bitboard = 0x00FF_0000_0000_0000; // 8th rank
+pub(crate) const BLACK_PROMOTION_ROW: Bitboard = 0x0000_0000_0000_FF00; // 1st rank
 
-pub trait BoardSquareExt {
-    fn get_x(&self) -> u8;
-    fn get_y(&self) -> u8;
-    fn parse(string: &str) -> Option<BoardSquare>;
-    fn unparse(&self) -> String;
-    fn from_position(x: u8, y: u8) -> BoardSquare;
-    fn to_mask(&self) -> Bitboard;
-
-    // TODO: macro!?
-    const A1: BoardSquare = 0;
-    const A2: BoardSquare = 8;
-    const A3: BoardSquare = 16;
-    const A4: BoardSquare = 24;
-    const A5: BoardSquare = 32;
-    const A6: BoardSquare = 40;
-    const A7: BoardSquare = 48;
-    const A8: BoardSquare = 56;
-
-    const B1: BoardSquare = 1;
-    const B2: BoardSquare = 9;
-    const B3: BoardSquare = 17;
-    const B4: BoardSquare = 25;
-    const B5: BoardSquare = 33;
-    const B6: BoardSquare = 41;
-    const B7: BoardSquare = 49;
-    const B8: BoardSquare = 57;
-
-    const C1: BoardSquare = 2;
-    const C2: BoardSquare = 10;
-    const C3: BoardSquare = 18;
-    const C4: BoardSquare = 26;
-    const C5: BoardSquare = 34;
-    const C6: BoardSquare = 42;
-    const C7: BoardSquare = 50;
-    const C8: BoardSquare = 58;
-
-    const D1: BoardSquare = 3;
-    const D2: BoardSquare = 11;
-    const D3: BoardSquare = 19;
-    const D4: BoardSquare = 27;
-    const D5: BoardSquare = 35;
-    const D6: BoardSquare = 43;
-    const D7: BoardSquare = 51;
-    const D8: BoardSquare = 59;
-
-    const E1: BoardSquare = 4;
-    const E2: BoardSquare = 12;
-    const E3: BoardSquare = 20;
-    const E4: BoardSquare = 28;
-    const E5: BoardSquare = 36;
-    const E6: BoardSquare = 44;
-    const E7: BoardSquare = 52;
-    const E8: BoardSquare = 60;
-
-    const F1: BoardSquare = 5;
-    const F2: BoardSquare = 13;
-    const F3: BoardSquare = 21;
-    const F4: BoardSquare = 29;
-    const F5: BoardSquare = 37;
-    const F6: BoardSquare = 45;
-    const F7: BoardSquare = 53;
-    const F8: BoardSquare = 61;
-
-    const G1: BoardSquare = 6;
-    const G2: BoardSquare = 14;
-    const G3: BoardSquare = 22;
-    const G4: BoardSquare = 30;
-    const G5: BoardSquare = 38;
-    const G6: BoardSquare = 46;
-    const G7: BoardSquare = 54;
-    const G8: BoardSquare = 62;
-
-    const H1: BoardSquare = 7;
-    const H2: BoardSquare = 15;
-    const H3: BoardSquare = 23;
-    const H4: BoardSquare = 31;
-    const H5: BoardSquare = 39;
-    const H6: BoardSquare = 47;
-    const H7: BoardSquare = 55;
-    const H8: BoardSquare = 63;
-}
-
-pub const WHITE_PROMOTION_ROW: Bitboard = 0x00FF_0000_0000_0000; // 8th rank
-pub const BLACK_PROMOTION_ROW: Bitboard = 0x0000_0000_0000_FF00; // 1st rank
-
-impl BoardSquareExt for u8 {
-    fn get_x(&self) -> u8 {
-        self % 8
-    }
-
-    fn get_y(&self) -> u8 {
-        self / 8
-    }
-
-    fn parse(string: &str) -> Option<BoardSquare> {
-        let mut chars = string.chars();
-
-        match (chars.next(), chars.next()) {
-            (Some(file), Some(rank)) if file.is_alphabetic() && rank.is_numeric() => Some(
-                BoardSquare::from_position(file as u8 - b'a' as u8, rank as u8 - b'1' as u8),
-            ),
-            (_, _) => None,
-        }
-    }
-
-    fn unparse(&self) -> String {
-        format!(
-            "{}{}",
-            (self.get_x() + b'a' as u8) as char,
-            (self.get_y() + b'1' as u8) as char
-        )
-    }
-
-    fn from_position(x: u8, y: u8) -> BoardSquare {
-        x + y * 8
-    }
-
-    fn to_mask(&self) -> Bitboard {
-        1 << self
-    }
-}
-
-pub struct BitboardIterator {
+pub(crate) struct BitboardIterator {
     remaining: u64,
 }
 
@@ -216,7 +98,6 @@ impl Iterator for BitboardIterator {
 }
 
 type PieceBitboards = [Bitboard; 64];
-type PawnAttackBitboards = [PieceBitboards; Color::COUNT];
 type ValidMoveBitboards = [PieceBitboards; Piece::COUNT];
 
 const fn create_bitboard_for_piece(
@@ -353,46 +234,14 @@ const fn calculate_attack_bitboards_for_pieces() -> ValidMoveBitboards {
     bitboards
 }
 
-const fn calculate_pawn_attack_moves() -> PawnAttackBitboards {
-    let mut bitboards = [[0; 64]; Color::COUNT];
+pub(crate) const PIECE_MOVE_BITBOARDS: ValidMoveBitboards = calculate_attack_bitboards_for_pieces();
 
-    let mut color = 0;
-    while color < Color::COUNT {
-        let mut x = 0;
-
-        while x < 8 {
-            let mut y = 0;
-
-            while y < 8 {
-                let deltas = match color {
-                    0 => [[-1, -1], [1, -1]],
-                    1 => [[-1, 1], [1, 1]],
-                    _ => unreachable!(),
-                };
-
-                bitboards[color][x + y * 8] |=
-                    create_bitboard_for_piece(x, y, &deltas, false, false, 0);
-
-                y += 1;
-            }
-
-            x += 1;
-        }
-        color += 1;
-    }
-
-    bitboards
-}
-
-pub const PIECE_MOVE_BITBOARDS: ValidMoveBitboards = calculate_attack_bitboards_for_pieces();
-pub const PAWN_ATTACK_BITBOARDS: PawnAttackBitboards = calculate_pawn_attack_moves();
-
-pub const MAGIC_ROOK_BLOCKER_BITBOARD: PieceBitboards =
+pub(crate) const MAGIC_ROOK_BLOCKER_BITBOARD: PieceBitboards =
     calculate_blocker_bitboards(get_attack_piece_deltas(&Piece::Rook, 0));
-pub const MAGIC_BISHOP_BLOCKER_BITBOARD: PieceBitboards =
+pub(crate) const MAGIC_BISHOP_BLOCKER_BITBOARD: PieceBitboards =
     calculate_blocker_bitboards(get_attack_piece_deltas(&Piece::Bishop, 0));
 
-pub const MAGIC_BLOCKER_BITBOARD: [Bitboard; 128] = {
+pub(crate) const MAGIC_BLOCKER_BITBOARD: [Bitboard; 128] = {
     let mut combined = [0u64; 128];
     let mut i = 0;
 
@@ -412,14 +261,14 @@ pub const MAGIC_BLOCKER_BITBOARD: [Bitboard; 128] = {
     combined
 };
 
-pub struct MagicBitboardEntry {
+struct MagicBitboardEntry {
     pub magic: u64,
     pub shift: u8,
     pub entries: Vec<Bitboard>,
     pub max_index: usize,
 }
 
-pub type MagicBitboards = Vec<MagicBitboardEntry>;
+type MagicBitboards = Vec<MagicBitboardEntry>;
 
 const fn calculate_blocker_bitboards(deltas: &[[i8; 2]]) -> PieceBitboards {
     let mut bitboards: PieceBitboards = [0; 64];
@@ -440,7 +289,7 @@ const fn calculate_blocker_bitboards(deltas: &[[i8; 2]]) -> PieceBitboards {
     bitboards
 }
 
-pub fn calculate_magic_bitboard(
+fn calculate_magic_bitboard(
     x: usize,
     y: usize,
     piece: &Piece,
@@ -550,7 +399,7 @@ pub fn calculate_magic_bitboard(
     }
 }
 
-pub fn serialize_magic_bitboards_to_file_flat<P: AsRef<Path>>(
+fn serialize_magic_bitboards_to_file_flat<P: AsRef<Path>>(
     magic_bitboards: &MagicBitboards,
     output_path: P,
 ) -> Result<()> {
@@ -604,7 +453,7 @@ pub fn serialize_magic_bitboards_to_file_flat<P: AsRef<Path>>(
     Ok(())
 }
 
-pub fn generate_magic_bitboards() {
+pub(crate) fn generate_magic_bitboards() {
     let mut magic_bitboards: MagicBitboards = Vec::with_capacity(128);
 
     // Initialize with basic magic numbers

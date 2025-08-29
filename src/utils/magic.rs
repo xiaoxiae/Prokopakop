@@ -1,5 +1,5 @@
 // This file is auto-generated. Do not edit manually.
-use crate::Bitboard;
+use crate::utils::bitboard::Bitboard;
 
 pub const MAGIC_TABLE: [(u64, usize, u8); 128] = [
     (0x0b80041124804000, 0, 52),

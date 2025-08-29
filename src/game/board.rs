@@ -1,16 +1,17 @@
 use super::pieces::{Color, Piece};
-use crate::game::ColoredPiece;
-use crate::utils::Bitboard;
-use crate::zobris::ZOBRIST;
-use crate::{
-    BLACK_PROMOTION_ROW, BitboardExt, BoardSquare, BoardSquareExt, MAGIC_BLOCKER_BITBOARD,
-    MAGIC_ENTRIES, MAGIC_TABLE, PIECE_MOVE_BITBOARDS, WHITE_PROMOTION_ROW,
+use crate::game::pieces::ColoredPiece;
+use crate::utils::bitboard::{
+    BLACK_PROMOTION_ROW, Bitboard, BitboardExt, MAGIC_BLOCKER_BITBOARD, PIECE_MOVE_BITBOARDS,
+    WHITE_PROMOTION_ROW,
 };
+use crate::utils::magic::{MAGIC_ENTRIES, MAGIC_TABLE};
+use crate::utils::square::{BoardSquare, BoardSquareExt};
+use crate::utils::zobris::ZOBRIST_TABLE;
 use strum::EnumCount;
 
-pub type BoardMove = u16;
+pub(crate) type BoardMove = u16;
 
-pub trait BoardMoveExt {
+pub(crate) trait BoardMoveExt {
     fn new(from: BoardSquare, to: BoardSquare, promotion: Option<Piece>) -> BoardMove;
     fn regular(from: BoardSquare, to: BoardSquare) -> BoardMove;
     fn promoting(from: BoardSquare, to: BoardSquare, promotion: Piece) -> BoardMove;
@@ -18,6 +19,8 @@ pub trait BoardMoveExt {
     fn get_to(&self) -> BoardSquare;
     fn get_promotion(&self) -> Option<Piece>;
     fn parse(string: &str) -> Option<BoardMove>;
+
+    #[allow(dead_code)]
     fn unparse(&self) -> String;
 }
 
@@ -91,13 +94,13 @@ impl BoardMoveExt for u16 {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct PinInfo {
+struct PinInfo {
     pub pinned_piece_position: BoardSquare,
     pub valid_move_squares: Bitboard,
 }
 
 #[derive(Debug, Clone)]
-pub struct PinData {
+struct PinData {
     pub pins: [[PinInfo; 4]; 2], // [bishop_pins, rook_pins]
     pub pin_counts: [usize; 2],  // [bishop_count, rook_count]
     pub all_pinned_pieces: Bitboard,
@@ -134,7 +137,7 @@ impl PinData {
     }
 }
 
-pub type PieceBoard = [Option<ColoredPiece>; 64];
+type PieceBoard = [Option<ColoredPiece>; 64];
 
 #[derive(Debug)]
 pub enum MoveResultType {
@@ -145,7 +148,8 @@ pub enum MoveResultType {
     NoHistory, // can't undo -- no history
 }
 
-pub trait ConstColor {
+#[allow(dead_code)]
+trait ConstColor {
     const COLOR: Color;
     const OPPONENT: Color;
     const COLOR_INDEX: usize;
@@ -154,8 +158,8 @@ pub trait ConstColor {
     type Opponent: ConstColor;
 }
 
-pub struct ConstWhite;
-pub struct ConstBlack;
+struct ConstWhite;
+struct ConstBlack;
 
 impl ConstColor for ConstWhite {
     const COLOR: Color = Color::White;
@@ -175,7 +179,7 @@ impl ConstColor for ConstBlack {
     type Opponent = ConstWhite;
 }
 
-pub trait ConstPiece {
+trait ConstPiece {
     const PIECE: Piece;
     const PIECE_INDEX: usize;
 }
@@ -197,19 +201,6 @@ impl_const_piece!(ConstBishop, Piece::Bishop);
 impl_const_piece!(ConstRook, Piece::Rook);
 impl_const_piece!(ConstQueen, Piece::Queen);
 impl_const_piece!(ConstKing, Piece::King);
-
-macro_rules! dispatch_piece {
-    ($piece:expr, $func:ident, $game:expr, $($args:expr),*) => {
-        match $piece {
-            Piece::Pawn => $game.$func::<ConstPawn>($($args),*),
-            Piece::Knight => $game.$func::<ConstKnight>($($args),*),
-            Piece::Bishop => $game.$func::<ConstBishop>($($args),*),
-            Piece::Rook => $game.$func::<ConstRook>($($args),*),
-            Piece::Queen => $game.$func::<ConstQueen>($($args),*),
-            Piece::King => $game.$func::<ConstKing>($($args),*),
-        }
-    };
-}
 
 macro_rules! dispatch_piece_color {
     ($piece:expr, $color:expr, $func:ident, $game:expr, $($args:expr),*) => {
@@ -274,16 +265,16 @@ pub struct Game {
 
     pub pieces: PieceBoard,
 
-    pub castling_flags: u8, // 0x0000KQkq, where kq/KQ is one if black/white king and queen
-    pub en_passant_bitmap: Bitboard, // if a piece just moved for the first time, 1 will be over the square
+    castling_flags: u8, // 0x0000KQkq, where kq/KQ is one if black/white king and queen
+    en_passant_bitmap: Bitboard, // if a piece just moved for the first time, 1 will be over the square
 
-    pub color_bitboards: [Bitboard; Color::COUNT],
-    pub piece_bitboards: [Bitboard; Piece::COUNT],
+    color_bitboards: [Bitboard; Color::COUNT],
+    piece_bitboards: [Bitboard; Piece::COUNT],
 
-    pub all_pieces: Bitboard,
+    all_pieces: Bitboard,
 
-    pub halfmoves: usize,
-    pub halfmoves_since_capture: usize,
+    halfmoves: usize,
+    halfmoves_since_capture: usize,
 
     // store the move, which piece was there, and en-passant + castling flags
     // the flags can NOT be calculated as an arbitrary position can have those
@@ -382,7 +373,7 @@ impl Game {
         game
     }
 
-    pub fn get_fen(&self) -> String {
+    pub(crate) fn get_fen(&self) -> String {
         let mut fen = String::new();
 
         for y in 0..8 {
@@ -488,7 +479,7 @@ impl Game {
         self.all_pieces = self.color_bitboards[Color::White as usize]
             | self.color_bitboards[Color::Black as usize];
 
-        self.zobrist_key ^= ZOBRIST.pieces[color as usize][piece as usize][square as usize];
+        self.zobrist_key ^= ZOBRIST_TABLE.pieces[color as usize][piece as usize][square as usize];
     }
 
     fn set_piece(&mut self, square: BoardSquare, colored_piece @ (piece, color): ColoredPiece) {
@@ -502,7 +493,7 @@ impl Game {
         self.all_pieces = self.color_bitboards[Color::White as usize]
             | self.color_bitboards[Color::Black as usize];
 
-        self.zobrist_key ^= ZOBRIST.pieces[color as usize][piece as usize][square as usize];
+        self.zobrist_key ^= ZOBRIST_TABLE.pieces[color as usize][piece as usize][square as usize];
     }
 
     fn set_piece_const<P: ConstPiece, C: ConstColor>(&mut self, square: BoardSquare) {
@@ -518,20 +509,20 @@ impl Game {
         self.all_pieces = self.color_bitboards[Color::White as usize]
             | self.color_bitboards[Color::Black as usize];
 
-        self.zobrist_key ^= ZOBRIST.pieces[C::COLOR_INDEX][P::PIECE_INDEX][square as usize];
+        self.zobrist_key ^= ZOBRIST_TABLE.pieces[C::COLOR_INDEX][P::PIECE_INDEX][square as usize];
     }
 
     fn update_turn(&mut self, delta: isize) {
         self.side = !self.side;
         self.halfmoves = self.halfmoves.wrapping_add_signed(delta);
 
-        self.zobrist_key ^= ZOBRIST.side_to_move;
+        self.zobrist_key ^= ZOBRIST_TABLE.side_to_move;
     }
 
     fn update_castling_flags(&mut self, castling_flags: u8) {
-        self.zobrist_key ^= ZOBRIST.castling[self.castling_flags as usize];
+        self.zobrist_key ^= ZOBRIST_TABLE.castling[self.castling_flags as usize];
         self.castling_flags = castling_flags;
-        self.zobrist_key ^= ZOBRIST.castling[castling_flags as usize];
+        self.zobrist_key ^= ZOBRIST_TABLE.castling[castling_flags as usize];
     }
 
     fn update_en_passant_bitmap(&mut self, en_passant_bitmap: Bitboard) {
@@ -539,7 +530,7 @@ impl Game {
         let prev_idx = self.en_passant_bitmap.next_index();
         let prev_mask = u8::from(self.en_passant_bitmap != 0);
         let prev_col = (prev_idx.get_x() % 64 + 1) * prev_mask;
-        self.zobrist_key ^= ZOBRIST.en_passant[prev_col as usize];
+        self.zobrist_key ^= ZOBRIST_TABLE.en_passant[prev_col as usize];
 
         // update
         self.en_passant_bitmap = en_passant_bitmap;
@@ -548,13 +539,13 @@ impl Game {
         let new_idx = self.en_passant_bitmap.next_index();
         let new_mask = u8::from(en_passant_bitmap != 0);
         let new_col = (new_idx.get_x() % 64 + 1) * new_mask;
-        self.zobrist_key ^= ZOBRIST.en_passant[new_col as usize];
+        self.zobrist_key ^= ZOBRIST_TABLE.en_passant[new_col as usize];
     }
 
     ///
     /// Bitboards for a piece of a given color.
     ///
-    pub fn colored_piece_bitboard_const<P: ConstPiece, C: ConstColor>(&self) -> Bitboard {
+    fn colored_piece_bitboard_const<P: ConstPiece, C: ConstColor>(&self) -> Bitboard {
         self.piece_bitboards[P::PIECE_INDEX] & self.color_bitboards[C::COLOR_INDEX]
     }
 
@@ -972,7 +963,7 @@ impl Game {
     /// Retrieve pinning information for rook and bishop attacks.
     /// Returns structured data with pinned pieces and their valid move squares.
     ///
-    pub fn get_pinner_bitboards_const<C: ConstColor>(&self) -> PinData {
+    fn get_pinner_bitboards_const<C: ConstColor>(&self) -> PinData {
         let king_position = self.get_king_position_const::<C>();
         let mut pin_data = PinData::default();
 
@@ -1016,7 +1007,7 @@ impl Game {
     /// Returns the attack bitmap (ray from attacker to king) for blocking moves,
     /// plus the attacker position for capture moves.
     ///
-    pub fn get_single_slider_attack_data_const<C: ConstColor>(
+    fn get_single_slider_attack_data_const<C: ConstColor>(
         &self,
         position: BoardSquare,
     ) -> Bitboard {
@@ -1319,7 +1310,7 @@ impl Game {
     ///
     /// Obtain a list of valid moves for the current position.
     ///
-    pub fn get_moves_const<C: ConstColor>(&self) -> (usize, [BoardMove; 256]) {
+    fn get_moves_const<C: ConstColor>(&self) -> (usize, [BoardMove; 256]) {
         let mut moves = [BoardMove::default(); 256];
         let mut move_count = 0usize;
 
@@ -1434,7 +1425,7 @@ impl Game {
         (move_count, moves)
     }
 
-    pub fn get_moves(&self) -> (usize, [BoardMove; 256]) {
+    pub(crate) fn get_moves(&self) -> (usize, [BoardMove; 256]) {
         match self.side {
             Color::White => self.get_moves_const::<ConstWhite>(),
             Color::Black => self.get_moves_const::<ConstBlack>(),

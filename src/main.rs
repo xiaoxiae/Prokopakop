@@ -3,11 +3,12 @@ mod game;
 mod test;
 mod utils;
 
-pub use crate::cli::*;
-pub use crate::controller::*;
-use crate::game::{BoardMoveExt, MoveResultType};
-pub use crate::utils::*;
 use clap::{Arg, Command};
+use controller::game_controller::*;
+use game::board::{BoardMoveExt, MoveResultType};
+use utils::bitboard::generate_magic_bitboards;
+use utils::cli::{BotCommand, GUICommand};
+use utils::square::{BoardSquare, BoardSquareExt};
 
 fn main() {
     env_logger::init();
@@ -61,7 +62,7 @@ fn main() {
                 controller.new_game();
             }
 
-            let moves = controller.perft(depth, true); // Use hashing by default for CLI
+            let moves = controller.perft(depth); // Use hashing by default for CLI
             let mut total = 0;
             for (m, c) in &moves {
                 println!("{}: {}", m.unparse(), c);
@@ -100,8 +101,7 @@ fn main() {
                 }
                 Some(GUICommand::IsReady) => GUICommand::respond(BotCommand::ReadyOk),
                 Some(GUICommand::ValidMoves(depth_string)) => {
-                    let moves = controller
-                        .perft(depth_string.parse::<usize>().unwrap(), controller.use_hash);
+                    let moves = controller.perft(depth_string.parse::<usize>().unwrap());
 
                     let mut total = 0;
                     for (m, c) in &moves {
@@ -137,7 +137,7 @@ fn main() {
                     // If parsing as move works, it has to be depth
                     match BoardSquare::parse(square_or_depth_string.as_str()) {
                         Some(square) => {
-                            let moves = controller.perft(0, false); // No hashing needed for depth 0
+                            let moves = controller.perft(0);
 
                             let moves_to = moves
                                 .iter()
@@ -149,10 +149,8 @@ fn main() {
                             controller.print_with_moves(moves_to);
                         }
                         None => {
-                            let moves = controller.perft(
-                                square_or_depth_string.parse::<usize>().unwrap_or(1),
-                                true, // Use hashing by default in play mode
-                            );
+                            let moves = controller
+                                .perft(square_or_depth_string.parse::<usize>().unwrap_or(1));
 
                             let mut total = 0;
                             for (m, c) in &moves {

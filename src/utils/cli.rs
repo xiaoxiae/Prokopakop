@@ -32,7 +32,7 @@ pub(crate) enum BotCommand {
 }
 
 impl GUICommand {
-    pub(crate) fn receive() -> Option<GUICommand> {
+    pub fn receive() -> Option<GUICommand> {
         let mut input = String::new();
 
         io::stdin()
@@ -68,7 +68,7 @@ impl GUICommand {
         }
     }
 
-    pub(crate) fn respond(command: BotCommand) {
+    pub fn respond(command: BotCommand) {
         match command {
             BotCommand::Identify(name, author) => {
                 println!("identify name {}", name);

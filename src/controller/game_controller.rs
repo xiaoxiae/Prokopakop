@@ -1,5 +1,6 @@
-use crate::game::{BoardMove, BoardMoveExt, Color, Game, MoveResultType};
-use crate::{BoardSquare, BoardSquareExt};
+use crate::game::board::{BoardMove, BoardMoveExt, Game, MoveResultType};
+use crate::game::pieces::Color;
+use crate::utils::square::{BoardSquare, BoardSquareExt};
 use fxhash::FxHashMap;
 
 pub enum ControllerMode {
@@ -9,11 +10,11 @@ pub enum ControllerMode {
 
 pub struct GameController {
     pub game: Game,
-    pub mode: Option<ControllerMode>,
     pub use_hash: bool,
+    pub mode: Option<ControllerMode>,
 }
 
-pub type PerftTable = FxHashMap<u64, usize>;
+type PerftTable = FxHashMap<u64, usize>;
 
 impl GameController {
     pub fn new() -> Self {
@@ -166,7 +167,11 @@ impl GameController {
         }
     }
 
-    pub fn perft(&mut self, depth: usize, hashing: bool) -> Vec<(BoardMove, usize)> {
+    pub fn perft(&mut self, depth: usize) -> Vec<(BoardMove, usize)> {
+        self.perft_with_hashing(depth, self.use_hash)
+    }
+
+    fn perft_with_hashing(&mut self, depth: usize, hashing: bool) -> Vec<(BoardMove, usize)> {
         let mut table: PerftTable = FxHashMap::default();
         let mut move_breakdown = vec![];
 

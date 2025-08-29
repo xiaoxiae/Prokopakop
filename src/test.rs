@@ -341,7 +341,7 @@ mod tests {
                 let mut controller = GameController::new();
                 controller.new_game_from_fen(fen);
 
-                let moves = controller.perft(*depth, true);
+                let moves = controller.perft(*depth);
 
                 let total_nodes: usize = moves.iter().map(|(_, count)| count).sum();
 
