@@ -96,33 +96,41 @@ pub struct PinInfo {
     pub valid_move_squares: Bitboard,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct PinData {
     pub pins: [[PinInfo; 4]; 2], // [bishop_pins, rook_pins]
     pub pin_counts: [usize; 2],  // [bishop_count, rook_count]
     pub all_pinned_pieces: Bitboard,
+
+    pub pin_mask_lookup: [Bitboard; 64],
 }
 
 impl PinData {
-    /// Get pin mask for a specific square
-    pub fn get_pin_mask_for_square(&self, square: BoardSquare) -> Bitboard {
-        // Check if this square has a pinned piece
-        if (self.all_pinned_pieces & (1 << square)) == 0 {
-            return !0;
+    fn default() -> Self {
+        Self {
+            pins: Default::default(), // [[PinInfo; 4]; 2] can still derive Default
+            pin_counts: [0; 2],
+            all_pinned_pieces: 0,
+            pin_mask_lookup: [!0; 64], // manually initialize the 64-element array
         }
+    }
 
-        // Find the pin info for this square
-        // TODO: this shit is very slow
+    /// Rebuilds the pin mask lookup table
+    pub fn rebuild_pin_mask_lookup(&mut self) {
+        self.pin_mask_lookup = [!0; 64];
+
         for piece_type in 0..2 {
             for i in 0..self.pin_counts[piece_type] {
                 let pin_info = &self.pins[piece_type][i];
-                if pin_info.pinned_piece_position == square {
-                    return pin_info.valid_move_squares;
-                }
+                let sq = pin_info.pinned_piece_position;
+                self.pin_mask_lookup[sq as usize] = pin_info.valid_move_squares;
             }
         }
+    }
 
-        unreachable!()
+    /// Get pin mask for a specific square using the lookup table
+    pub fn get_pin_mask_for_square(&self, square: BoardSquare) -> Bitboard {
+        self.pin_mask_lookup[square as usize]
     }
 }
 
@@ -527,18 +535,20 @@ impl Game {
     }
 
     fn update_en_passant_bitmap(&mut self, en_passant_bitmap: Bitboard) {
-        // TODO: remove ifs with add/bit magic
-        if self.en_passant_bitmap != 0 {
-            let previous_column = self.en_passant_bitmap.next_index().get_x();
-            self.zobrist_key ^= ZOBRIST.en_passant[previous_column as usize + 1];
-        }
+        // remove old
+        let prev_idx = self.en_passant_bitmap.next_index();
+        let prev_mask = u8::from(self.en_passant_bitmap != 0);
+        let prev_col = (prev_idx.get_x() % 64 + 1) * prev_mask;
+        self.zobrist_key ^= ZOBRIST.en_passant[prev_col as usize];
 
+        // update
         self.en_passant_bitmap = en_passant_bitmap;
 
-        if en_passant_bitmap != 0 {
-            let new_column = en_passant_bitmap.next_index().get_x();
-            self.zobrist_key ^= ZOBRIST.en_passant[new_column as usize + 1];
-        }
+        // add new
+        let new_idx = self.en_passant_bitmap.next_index();
+        let new_mask = u8::from(en_passant_bitmap != 0);
+        let new_col = (new_idx.get_x() % 64 + 1) * new_mask;
+        self.zobrist_key ^= ZOBRIST.en_passant[new_col as usize];
     }
 
     ///
@@ -964,41 +974,22 @@ impl Game {
     ///
     pub fn get_pinner_bitboards_const<C: ConstColor>(&self) -> PinData {
         let king_position = self.get_king_position_const::<C>();
-
         let mut pin_data = PinData::default();
 
-        // we're doing 3 calls to colored_piece_bitboard to get the ray/pieces
-        //
-        //  Atk        |   (3)
-        //   |         |    |
-        //  Pin   |    |    |
-        //   |    |    |    |
-        //  Kng  (1)  (2)   |
-        //
         for_each_simple_slider!(|P| {
-            // (1) get occlusions to get possible pinned pieces
             let raycast_1 = self.get_occlusion_bitmap_const::<P>(king_position, self.all_pieces);
-
-            // (2) subtract the calculated occlusions from blockers to get the blocked pieces
             let raycast_2 =
                 self.get_occlusion_bitmap_const::<P>(king_position, self.all_pieces & !raycast_1);
 
-            // now we can get a bitmap of the attackers that are pinning things down
-            // queen accounts for both rook and bishop so we count it both times
             let attacker_positions = (self.colored_piece_bitboard_const::<P, C::Opponent>()
                 | self.colored_piece_bitboard_const::<ConstQueen, C::Opponent>())
                 & (raycast_2 & !raycast_1);
 
-            // for each of these, calculate the pinned piece by casting back from the attacker
             for attacker_position in attacker_positions.iter_positions() {
-                // (3) cast back from attacker to get the raycast
                 let raycast_3 = self.get_occlusion_bitmap_const::<P>(
                     attacker_position,
                     self.all_pieces & !raycast_1,
                 );
-
-                // only one pinned pieces
-                debug_assert!((raycast_3 & raycast_1 & self.all_pieces).count_ones() == 1);
 
                 let pinned_piece_position = (raycast_3 & raycast_1 & self.all_pieces).next_index();
 
@@ -1009,14 +1000,13 @@ impl Game {
                     valid_move_squares: valid_positions,
                 };
 
-                // Add to all pinned pieces bitboard
                 pin_data.all_pinned_pieces |= 1 << pinned_piece_position;
-
-                // Add to appropriate array using piece value as index
                 pin_data.pins[P::PIECE_INDEX][pin_data.pin_counts[P::PIECE_INDEX]] = pin_info;
                 pin_data.pin_counts[P::PIECE_INDEX] += 1;
             }
         });
+
+        pin_data.rebuild_pin_mask_lookup();
 
         pin_data
     }
@@ -1077,7 +1067,6 @@ impl Game {
         // move "away" from them, which is technically a safe square
         let mut slider_attack_bitboard = Bitboard::default();
 
-        // Replace the TODO section with:
         let opponent_rooks =
             attacked_from_bitboard & self.colored_piece_bitboard_const::<ConstRook, C::Opponent>();
         let opponent_bishops = attacked_from_bitboard
