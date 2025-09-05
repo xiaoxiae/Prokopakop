@@ -11,7 +11,10 @@ use std::thread::{self, JoinHandle};
 
 pub struct GameController {
     pub game: Game,
-    pub use_hash: bool,
+    pub perft_hash: bool,
+    pub hash_table_size: usize,
+    pub move_overhead: u64,
+    pub threads: u64,
     initialized: bool,
     search_thread: Option<JoinHandle<()>>,
     stop_flag: Arc<AtomicBool>,
@@ -143,10 +146,10 @@ impl SearchParams {
         search_params
     }
 
-    pub fn calculate_move_time(&self, color: Color) -> Option<u64> {
-        // If movetime is specified, use that
+    pub fn calculate_move_time(&self, color: Color, move_overhead: u64) -> Option<u64> {
+        // If movetime is specified, use that (subtract move overhead)
         if let Some(movetime) = self.movetime {
-            return Some(movetime);
+            return Some(movetime.saturating_sub(move_overhead));
         }
 
         // If infinite search, no time limit
@@ -164,15 +167,19 @@ impl SearchParams {
         if let Some(time) = time_left {
             let moves_remaining = self.movestogo.unwrap_or(30) as u64; // Assume 30 moves if not specified
 
-            // Keep 50 ms buffer
-            let available_time = time.saturating_sub(50);
+            // Apply move overhead - this accounts for network/GUI delays
+            let available_time = time.saturating_sub(move_overhead);
 
             // Spend most of increment
             let base_time = available_time / moves_remaining.max(1);
             let allocated_time = base_time + (increment * 8 / 10);
 
-            // Min 10ms for move
-            Some(allocated_time.max(10))
+            // Min 10ms for move (but ensure we don't go below 1ms due to overhead)
+            Some(
+                allocated_time
+                    .max(10)
+                    .saturating_sub(move_overhead.min(allocated_time / 2)),
+            )
         } else {
             None
         }
@@ -185,7 +192,10 @@ impl GameController {
     pub fn new() -> Self {
         Self {
             game: Game::new(None),
-            use_hash: true,
+            perft_hash: true,
+            hash_table_size: 16,
+            move_overhead: 10,
+            threads: 1,
             initialized: false,
             search_thread: None,
             stop_flag: Arc::new(AtomicBool::new(false)),
@@ -211,13 +221,67 @@ impl GameController {
 
     pub fn set_option(&mut self, name: &str, value: &str) {
         match name.to_lowercase().as_str() {
-            "hash" => match value.to_lowercase().as_str() {
-                "true" => self.use_hash = true,
-                "false" => self.use_hash = false,
+            "perfthash" => match value.to_lowercase().as_str() {
+                "true" => self.perft_hash = true,
+                "false" => self.perft_hash = false,
                 _ => eprintln!(
                     "Invalid value for Hash option: {}. Expected 'true' or 'false'",
                     value
                 ),
+            },
+            "move overhead" => match value.parse::<u64>() {
+                Ok(overhead) => {
+                    if overhead <= 5000 {
+                        self.move_overhead = overhead;
+                    } else {
+                        eprintln!(
+                            "Invalid value for Move Overhead option: {}. Expected value between 0 and 5000",
+                            value
+                        );
+                    }
+                }
+                Err(_) => {
+                    eprintln!(
+                        "Invalid value for Move Overhead option: {}. Expected numeric value",
+                        value
+                    );
+                }
+            },
+            "hash" => match value.parse::<usize>() {
+                Ok(val) => {
+                    if val <= 33554432 {
+                        self.hash_table_size = val;
+                    } else {
+                        eprintln!(
+                            "Invalid value for Hash option: {}. Expected value between 1 and 33554432",
+                            value
+                        );
+                    }
+                }
+                Err(_) => {
+                    eprintln!(
+                        "Invalid value for Hash option: {}. Expected numeric value",
+                        value
+                    );
+                }
+            },
+            "threads" => match value.parse::<u64>() {
+                Ok(threads) => {
+                    if threads <= 1024 {
+                        self.threads = threads;
+                    } else {
+                        eprintln!(
+                            "Invalid value for Threads option: {}. Expected value between 1 and 1024",
+                            value
+                        );
+                    }
+                }
+                Err(_) => {
+                    eprintln!(
+                        "Invalid value for Threads option: {}. Expected numeric value",
+                        value
+                    );
+                }
             },
             _ => {
                 eprintln!("Unknown option: {}", name);
@@ -243,7 +307,7 @@ impl GameController {
     }
 
     pub fn perft(&mut self, depth: usize) -> Vec<(BoardMove, usize)> {
-        self.perft_with_hashing(depth, self.use_hash)
+        self.perft_with_hashing(depth, self.perft_hash)
     }
 
     fn perft_with_hashing(&mut self, depth: usize, hashing: bool) -> Vec<(BoardMove, usize)> {
@@ -339,12 +403,13 @@ impl GameController {
 
         let mut game_clone = self.game.clone();
         let stop_flag = Arc::clone(&self.stop_flag);
+        let move_overhead = self.move_overhead;
 
         let handle = thread::spawn(move || {
             let limits = SearchLimits {
                 max_depth: search_params.depth,
                 max_nodes: search_params.nodes,
-                max_time_ms: search_params.calculate_move_time(game_clone.side),
+                max_time_ms: search_params.calculate_move_time(game_clone.side, move_overhead),
                 moves: search_params.searchmoves,
                 infinite: search_params.infinite,
             };
@@ -367,5 +432,12 @@ impl GameController {
             // Give the thread a moment to finish gracefully
             let _ = handle.join();
         }
+    }
+
+    pub fn print_uci_options(&self) {
+        println!("option name Hash type spin default 16 min 1 max 33554432");
+        println!("option name Move Overhead type spin default 10 min 0 max 5000");
+        println!("option name Threads type spin default 1 min 1 max 1024");
+        println!("option name PerftHash type check default true");
     }
 }

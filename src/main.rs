@@ -48,6 +48,9 @@ fn main() {
 
                 println!("id name {}", name);
                 println!("id author {}", author);
+
+                controller.print_uci_options();
+
                 println!("uciok");
 
                 controller.initialize();

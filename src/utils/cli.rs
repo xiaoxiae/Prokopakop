@@ -33,10 +33,22 @@ impl GUICommand {
                 GUICommand::MovePosition(Some(moves.iter().map(|m| m.to_string()).collect()))
             }
             ["position", "fen", fen @ ..] if !fen.is_empty() => {
-                GUICommand::FenPosition(fen.join(" "))
+                // Handle FEN positions that might have moves after them
+                if let Some(moves_idx) = fen.iter().position(|&part| part == "moves") {
+                    let fen_string = fen[..moves_idx].join(" ");
+
+                    let moves = fen[moves_idx + 1..]
+                        .iter()
+                        .map(|m| m.to_string())
+                        .collect::<Vec<String>>();
+
+                    GUICommand::FenPosition(fen_string)
+                } else {
+                    GUICommand::FenPosition(fen.join(" "))
+                }
             }
-            ["setoption", "name", name, "value", value] => {
-                GUICommand::SetOption(name.to_string(), value.to_string())
+            ["setoption", "name", name_and_rest @ ..] if !name_and_rest.is_empty() => {
+                Self::parse_setoption(name_and_rest)
             }
             ["go", "perft", depth] => GUICommand::Perft(depth.to_string()),
             ["go", params @ ..] => {
@@ -45,6 +57,30 @@ impl GUICommand {
             ["stop"] => GUICommand::Stop,
             ["quit"] => GUICommand::Quit,
             _ => GUICommand::Invalid(input),
+        }
+    }
+
+    fn parse_setoption(parts: &[&str]) -> GUICommand {
+        // Find the "value" keyword to split name and value
+        if let Some(value_pos) = parts.iter().position(|&part| part == "value") {
+            // Everything before "value" is the option name
+            let name = parts[..value_pos].join(" ");
+            // Everything after "value" is the option value
+            let value = parts[value_pos + 1..].join(" ");
+
+            if !name.is_empty() && !value.is_empty() {
+                GUICommand::SetOption(name, value)
+            } else {
+                GUICommand::Invalid(format!("setoption name {} value {}", name, value))
+            }
+        } else {
+            // No "value" keyword found - this could be a button-type option
+            let name = parts.join(" ");
+            if !name.is_empty() {
+                GUICommand::SetOption(name, String::new()) // Empty value for button options
+            } else {
+                GUICommand::Invalid("setoption with empty name".to_string())
+            }
         }
     }
 }
