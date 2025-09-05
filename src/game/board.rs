@@ -1,5 +1,5 @@
 use super::pieces::{Color, Piece};
-use crate::game::evaluate::evaluate_material;
+use crate::game::evaluate::{calculate_game_phase, evaluate_material, evaluate_positional};
 use crate::game::pieces::ColoredPiece;
 use crate::utils::bitboard::{
     BLACK_PROMOTION_ROW, Bitboard, BitboardExt, MAGIC_BLOCKER_BITBOARD, PIECE_MOVE_BITBOARDS,
@@ -1442,8 +1442,11 @@ impl Game {
     }
 
     pub(crate) fn evaluate(&self) -> f32 {
-        let material_value = evaluate_material(self);
+        let (white_material, black_material) = evaluate_material(self);
 
-        material_value
+        let game_phase = calculate_game_phase(white_material + black_material);
+        let positional_value = evaluate_positional(self, game_phase);
+
+        white_material - black_material + positional_value
     }
 }
