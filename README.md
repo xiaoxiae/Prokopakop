@@ -1,7 +1,6 @@
 # Prokopakop
 
-A moderately fast chess engine written in Rust that **kops the Prokop**.
-
+A moderately fast UCI chess engine written in Rust that **kops the Prokop**.
 
 <figure>
     <img src="scripts/plots/nps_plot.png" alt="Performance Across Commits" width="100%">
@@ -10,56 +9,45 @@ A moderately fast chess engine written in Rust that **kops the Prokop**.
 
 ## Technical Features
 
+### Move Generation
+
 - **[Magic Bitboards](https://www.chessprogramming.org/Magic_Bitboards)** - Fast sliding piece move generation
 - **[Generics](https://www.chessprogramming.org/Generic_Programming)** - Const generics for piece/color function variants
-- **Iterative [Zobrist Hashing](https://www.chessprogramming.org/Generic_Programming)** - Position hashing for transposition tables
+- **Iterative [Zobrist Hashing](https://www.chessprogramming.org/Zobrist_Hashing)** - Position hashing for transposition tables
+
+### Search + Evaluation
+
+- **[Alpha-Beta](https://www.chessprogramming.org/Alpha-Beta) Search** via **[Negamax](https://www.chessprogramming.org/Negamax)** - Negamax search with alpha-beta pruning
+- **[Iterative Deepening](https://www.chessprogramming.org/Iterative_Deepening)** - Progressive search depth
 
 ## Usage
 
 ### Build & Run
 ```bash
-cargo build --release
-./target/release/prokopakop
+cargo run --release
 ```
 
-### Play Mode
-For interactive command-line play:
+### UCI Mode
+Prokopakop implements most of the UCI (Universal Chess Interface) protocol for integration with chess GUIs:
+
 ```
-play                          # Enter play mode
-move <from><to>[promotion]   # Make move (e.g., e2e4, e7e8q)
-unmove                        # Undo last move
-status                        # Display board
-fen                           # Show current FEN
-moves                         # Show legal moves
-moves <square>                # Show moves from square
-moves <depth>                 # Run perft to depth
-position startpos             # Reset board
-position fen <FEN>            # Load FEN position
-quit                          # Exit
+uci                              # Initialize UCI mode
+isready                          # Check engine readiness
+ucinewgame                       # Start new game
+position startpos                # Set starting position
+position startpos moves <moves>  # Set position with moves
+position fen <FEN>               # Set position from FEN
+setoption name <id> value <val>  # Set engine options
+go perft <depth>                 # Run perft test
+go <params>                      # Search with various parameters
+stop                             # Stop current search
+quit                             # Exit engine
 ```
-
-### UCI Mode (WORK IN PROGRESS)
-For chess GUI integration:
-```
-uci                           # Enter UCI mode
-ucinewgame                    # Start a new game
-position startpos             # Set starting position
-position fen <FEN>            # Set position from FEN
-go perft <depth>              # Run perft test
-isready                       # Check engine readiness
-quit                          # Exit
-```
-
-Other `go` commands are **not** supported; this is not a chess bot (yet).
-
-
-
 
 ### Command Line Options
 ```bash
-prokopakop --fen "<FEN>"      # Start with FEN position
-prokopakop --perft <depth>    # Run perft test
-prokopakop --magic            # Generate magic bitboards
+prokopakop                    # Start in UCI mode
+prokopakop --magic            # Bootstrap magic bitboards
 ```
 
 ## Resources

@@ -1,17 +1,182 @@
-use crate::game::board::{BoardMove, BoardMoveExt, Game, MoveResultType};
+use crate::game::board::{BoardMove, BoardMoveExt, Game};
 use crate::game::pieces::Color;
-use crate::utils::square::{BoardSquare, BoardSquareExt};
-use fxhash::FxHashMap;
+use crate::game::search::{SearchLimits, iterative_deepening};
 
-pub enum ControllerMode {
-    UCI,
-    Play,
-}
+use fxhash::FxHashMap;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
+use std::thread::{self, JoinHandle};
 
 pub struct GameController {
     pub game: Game,
     pub use_hash: bool,
-    pub mode: Option<ControllerMode>,
+    initialized: bool,
+    search_thread: Option<JoinHandle<()>>,
+    stop_flag: Arc<AtomicBool>,
+}
+
+#[derive(Debug)]
+pub enum MoveResultType {
+    Success,         // successful move
+    InvalidNotation, // wrong algebraic notation
+    InvalidMove,     // invalid move
+}
+
+#[derive(Debug, Clone)]
+pub struct SearchParams {
+    pub depth: Option<usize>,        // search to depth x
+    pub movetime: Option<u64>,       // search exactly x milliseconds
+    pub wtime: Option<u64>,          // white has x milliseconds left on clock
+    pub btime: Option<u64>,          // black has x milliseconds left on clock
+    pub winc: Option<u64>,           // white increment per move in milliseconds
+    pub binc: Option<u64>,           // black increment per move in milliseconds
+    pub movestogo: Option<usize>,    // there are x moves to the next time control
+    pub nodes: Option<u64>,          // search x nodes only
+    pub infinite: bool,              // search until "stop" command
+    pub searchmoves: Vec<BoardMove>, // restrict search to these moves only
+}
+
+impl Default for SearchParams {
+    fn default() -> Self {
+        Self {
+            depth: None,
+            movetime: None,
+            wtime: None,
+            btime: None,
+            winc: None,
+            binc: None,
+            movestogo: None,
+            nodes: None,
+            infinite: false,
+            searchmoves: Vec::new(),
+        }
+    }
+}
+
+impl SearchParams {
+    pub fn parse(params: Vec<String>) -> Self {
+        let mut search_params = SearchParams::default();
+        let mut iter = params.iter();
+
+        while let Some(param) = iter.next() {
+            match param.as_str() {
+                "depth" => {
+                    if let Some(value) = iter.next() {
+                        search_params.depth = value.parse().ok();
+                    }
+                }
+                "movetime" => {
+                    if let Some(value) = iter.next() {
+                        search_params.movetime = value.parse().ok();
+                    }
+                }
+                "wtime" => {
+                    if let Some(value) = iter.next() {
+                        search_params.wtime = value.parse().ok();
+                    }
+                }
+                "btime" => {
+                    if let Some(value) = iter.next() {
+                        search_params.btime = value.parse().ok();
+                    }
+                }
+                "winc" => {
+                    if let Some(value) = iter.next() {
+                        search_params.winc = value.parse().ok();
+                    }
+                }
+                "binc" => {
+                    if let Some(value) = iter.next() {
+                        search_params.binc = value.parse().ok();
+                    }
+                }
+                "movestogo" => {
+                    if let Some(value) = iter.next() {
+                        search_params.movestogo = value.parse().ok();
+                    }
+                }
+                "nodes" => {
+                    if let Some(value) = iter.next() {
+                        search_params.nodes = value.parse().ok();
+                    }
+                }
+                "infinite" => {
+                    search_params.infinite = true;
+                }
+                "searchmoves" => {
+                    // Collect all remaining moves
+                    while let Some(move_str) = iter.next() {
+                        // Check if this is another parameter (not a move)
+                        if [
+                            "depth",
+                            "movetime",
+                            "wtime",
+                            "btime",
+                            "winc",
+                            "binc",
+                            "movestogo",
+                            "nodes",
+                            "infinite",
+                        ]
+                        .contains(&move_str.as_str())
+                        {
+                            // Put it back by breaking and letting the outer loop handle it
+                            // Note: This is a simplified approach. In production, you might want
+                            // to handle this differently
+                            break;
+                        }
+
+                        if let Some(board_move) = BoardMove::parse(move_str) {
+                            search_params.searchmoves.push(board_move);
+                        }
+                    }
+                }
+                _ => {
+                    // Unknown parameter, skip
+                    eprintln!("Unknown go parameter: {}", param);
+                }
+            }
+        }
+
+        search_params
+    }
+
+    pub fn calculate_move_time(&self, color: Color) -> Option<u64> {
+        // If movetime is specified, use that
+        if let Some(movetime) = self.movetime {
+            return Some(movetime);
+        }
+
+        // If infinite search, no time limit
+        if self.infinite {
+            return None;
+        }
+
+        // Get the time and increment for the current side
+        let (time_left, increment) = match color {
+            Color::White => (self.wtime, self.winc.unwrap_or(0)),
+            Color::Black => (self.btime, self.binc.unwrap_or(0)),
+        };
+
+        // If we have time control information
+        if let Some(time) = time_left {
+            let moves_remaining = self.movestogo.unwrap_or(30) as u64; // Assume 30 moves if not specified
+
+            // Keep 50 ms buffer
+            let available_time = time.saturating_sub(50);
+
+            // Spend most of increment
+            let base_time = available_time / moves_remaining.max(1);
+            let allocated_time = base_time + (increment * 8 / 10);
+
+            // Min 10ms for move
+            Some(allocated_time.max(10))
+        } else {
+            None
+        }
+    }
 }
 
 type PerftTable = FxHashMap<u64, usize>;
@@ -20,8 +185,10 @@ impl GameController {
     pub fn new() -> Self {
         Self {
             game: Game::new(None),
-            mode: None,
-            use_hash: true, // Default to true
+            use_hash: true,
+            initialized: false,
+            search_thread: None,
+            stop_flag: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -33,9 +200,13 @@ impl GameController {
         self.game = Game::new(Some(fen));
     }
 
-    pub fn initialize(&mut self, mode: ControllerMode) {
-        self.mode = Some(mode);
+    pub fn initialize(&mut self) {
+        self.initialized = true;
         self.new_game();
+    }
+
+    pub fn is_initialized(&self) -> bool {
+        self.initialized
     }
 
     pub fn set_option(&mut self, name: &str, value: &str) {
@@ -54,94 +225,8 @@ impl GameController {
         }
     }
 
-    pub fn print_with_moves(&self, possible_moves: Vec<BoardSquare>) {
-        const RESET: &str = "\x1b[0m";
-        const LIGHT_SQUARE_BG: &str = "\x1b[48;5;172m";
-        const DARK_SQUARE_BG: &str = "\x1b[48;5;130m";
-        const WHITE_PIECE: &str = "\x1b[1;97m";
-        const BLACK_PIECE: &str = "\x1b[1;30m";
-        const MOVE_HIGHLIGHT: &str = "\x1b[1;34m";
-        const HEADING_BG: &str = "\x1b[48;5;240m"; // Neutral gray background
-
-        // Print centered heading with background
-        let heading_text = match self.game.side {
-            Color::White => "White to move",
-            Color::Black => "Black to move",
-        };
-        let heading_color = match self.game.side {
-            Color::White => WHITE_PIECE,
-            Color::Black => BLACK_PIECE,
-        };
-
-        // Board width is 8 squares * 3 chars each = 24 chars
-        let board_width = 24;
-        let padding = (board_width - heading_text.len()) / 2;
-        let total_padding = board_width - heading_text.len();
-        let right_padding = total_padding - padding;
-
-        println!(
-            "{}{}{}{}{}{}",
-            HEADING_BG,
-            " ".repeat(padding),
-            heading_color,
-            heading_text,
-            " ".repeat(right_padding),
-            RESET
-        );
-
-        // Convert possible moves to a HashSet for O(1) lookup
-        let move_squares: std::collections::HashSet<(usize, usize)> = possible_moves
-            .iter()
-            .map(|square| (square.get_x() as usize, square.get_y() as usize))
-            .collect();
-
-        for y in (0..8).rev() {
-            let mut line = String::new();
-            for x in 0..8 {
-                let is_light_square = (x + y) % 2 == 1;
-                let bg_color = if is_light_square {
-                    LIGHT_SQUARE_BG
-                } else {
-                    DARK_SQUARE_BG
-                };
-                line.push_str(bg_color);
-
-                match self.game.pieces[x + y * 8] {
-                    Some((piece, color)) => {
-                        let piece_color = match color {
-                            Color::White => WHITE_PIECE,
-                            Color::Black => BLACK_PIECE,
-                        };
-                        line.push_str(&format!("{} {} {}", piece_color, piece.to_emoji(), RESET));
-                    }
-                    None => {
-                        // Check if this square is a possible move
-                        if move_squares.contains(&(x, y)) {
-                            line.push_str(&format!("{} ● {}", MOVE_HIGHLIGHT, RESET));
-                        } else {
-                            line.push_str("   ");
-                        }
-                    }
-                }
-
-                line.push_str(RESET);
-            }
-            println!("{}", line);
-        }
-    }
-
-    pub fn print(&self) {
-        self.print_with_moves(vec![]);
-    }
-
-    pub fn print_fen(&self) {
-        println!("{}", self.game.get_fen());
-    }
-
-    pub fn try_move_piece(&mut self, long_algebraic_notation: String) -> MoveResultType {
-        match BoardMove::parse(long_algebraic_notation.as_str())
-            .or(long_algebraic_notation.parse::<BoardMove>().ok())
-        {
+    pub fn try_move_piece(&mut self, long_algebraic_notation: &str) -> MoveResultType {
+        match BoardMove::parse(long_algebraic_notation) {
             Some(board_move) => {
                 let (move_count, valid_moves) = self.game.get_moves();
 
@@ -154,16 +239,6 @@ impl GameController {
                 }
             }
             None => MoveResultType::InvalidNotation,
-        }
-    }
-
-    pub fn try_unmove_piece(&mut self) -> MoveResultType {
-        match self.game.history.len() {
-            0 => MoveResultType::NoHistory,
-            _ => {
-                self.game.unmake_move();
-                MoveResultType::Success
-            }
         }
     }
 
@@ -253,5 +328,44 @@ impl GameController {
         self.game.unmake_move();
 
         total_count
+    }
+
+    pub fn search(&mut self, params: Vec<String>) {
+        // Stop + reset any existing search
+        self.stop_search();
+        self.stop_flag.store(false, Ordering::Relaxed);
+
+        let search_params = SearchParams::parse(params);
+
+        let mut game_clone = self.game.clone();
+        let stop_flag = Arc::clone(&self.stop_flag);
+
+        let handle = thread::spawn(move || {
+            let limits = SearchLimits {
+                max_depth: search_params.depth,
+                max_nodes: search_params.nodes,
+                max_time_ms: search_params.calculate_move_time(game_clone.side),
+                moves: search_params.searchmoves,
+                infinite: search_params.infinite,
+            };
+
+            let result = iterative_deepening(&mut game_clone, limits, stop_flag);
+
+            // Output the best move in UCI format
+            println!("bestmove {}", result.best_move.unparse());
+        });
+
+        self.search_thread = Some(handle);
+    }
+
+    pub fn stop_search(&mut self) {
+        // Signal the search to stop
+        self.stop_flag.store(true, Ordering::Relaxed);
+
+        // Wait for the thread to finish
+        if let Some(handle) = self.search_thread.take() {
+            // Give the thread a moment to finish gracefully
+            let _ = handle.join();
+        }
     }
 }

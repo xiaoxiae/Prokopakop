@@ -1,4 +1,5 @@
 use super::pieces::{Color, Piece};
+use crate::game::evaluate::evaluate_material;
 use crate::game::pieces::ColoredPiece;
 use crate::utils::bitboard::{
     BLACK_PROMOTION_ROW, Bitboard, BitboardExt, MAGIC_BLOCKER_BITBOARD, PIECE_MOVE_BITBOARDS,
@@ -12,6 +13,7 @@ use strum::EnumCount;
 pub(crate) type BoardMove = u16;
 
 pub(crate) trait BoardMoveExt {
+    fn empty() -> BoardMove;
     fn new(from: BoardSquare, to: BoardSquare, promotion: Option<Piece>) -> BoardMove;
     fn regular(from: BoardSquare, to: BoardSquare) -> BoardMove;
     fn promoting(from: BoardSquare, to: BoardSquare, promotion: Piece) -> BoardMove;
@@ -25,6 +27,10 @@ pub(crate) trait BoardMoveExt {
 }
 
 impl BoardMoveExt for u16 {
+    fn empty() -> BoardMove {
+        0
+    }
+
     fn new(from: BoardSquare, to: BoardSquare, promotion: Option<Piece>) -> BoardMove {
         (from as u16)
             | ((to as u16) << 6)
@@ -139,15 +145,6 @@ impl PinData {
 
 type PieceBoard = [Option<ColoredPiece>; 64];
 
-#[derive(Debug)]
-pub enum MoveResultType {
-    Success,         // successful move
-    InvalidNotation, // wrong algebraic notation
-    InvalidMove,     // invalid move
-
-    NoHistory, // can't undo -- no history
-}
-
 #[allow(dead_code)]
 trait ConstColor {
     const COLOR: Color;
@@ -259,7 +256,7 @@ macro_rules! for_each_non_king_const_piece {
     }};
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Game {
     pub side: Color,
 
@@ -373,6 +370,7 @@ impl Game {
         game
     }
 
+    #[allow(dead_code)]
     pub(crate) fn get_fen(&self) -> String {
         let mut fen = String::new();
 
@@ -1430,5 +1428,22 @@ impl Game {
             Color::White => self.get_moves_const::<ConstWhite>(),
             Color::Black => self.get_moves_const::<ConstBlack>(),
         }
+    }
+
+    pub(crate) fn is_king_in_check(&self, color: Color) -> bool {
+        match color {
+            Color::White => self.is_square_attacked_const::<ConstBlack>(
+                self.get_king_position_const::<ConstWhite>(),
+            ),
+            Color::Black => self.is_square_attacked_const::<ConstWhite>(
+                self.get_king_position_const::<ConstBlack>(),
+            ),
+        }
+    }
+
+    pub(crate) fn evaluate(&self) -> f32 {
+        let material_value = evaluate_material(self);
+
+        material_value
     }
 }

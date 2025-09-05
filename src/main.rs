@@ -4,11 +4,10 @@ mod test;
 mod utils;
 
 use clap::{Arg, Command};
-use controller::game_controller::*;
-use game::board::{BoardMoveExt, MoveResultType};
+use controller::game_controller::{GameController, MoveResultType};
+use game::board::BoardMoveExt;
 use utils::bitboard::generate_magic_bitboards;
-use utils::cli::{BotCommand, GUICommand};
-use utils::square::{BoardSquare, BoardSquareExt};
+use utils::cli::GUICommand;
 
 fn main() {
     env_logger::init();
@@ -16,21 +15,7 @@ fn main() {
     // Parse command line arguments
     let matches = Command::new("Prokopakop")
         .version("1.0")
-        .about("Na Prokopání.")
-        .arg(
-            Arg::new("fen")
-                .long("fen")
-                .value_name("FEN")
-                .help("Sets initial position from FEN string")
-                .num_args(1),
-        )
-        .arg(
-            Arg::new("perft")
-                .long("perft")
-                .value_name("DEPTH")
-                .help("Run perft to specified depth")
-                .num_args(1),
-        )
+        .about("UCI Chess Engine")
         .arg(
             Arg::new("magic")
                 .long("magic")
@@ -47,141 +32,66 @@ fn main() {
 
     let mut controller = GameController::new();
 
-    // Handle FEN position
-    if let Some(fen) = matches.get_one::<String>("fen") {
-        controller.initialize(ControllerMode::Play);
-        controller.new_game_from_fen(fen.as_str());
-    }
-
-    // Handle perft
-    if let Some(depth_str) = matches.get_one::<String>("perft") {
-        if let Ok(depth) = depth_str.parse::<usize>() {
-            // Initialize if not already done
-            if controller.mode.is_none() {
-                controller.initialize(ControllerMode::Play);
-                controller.new_game();
-            }
-
-            let moves = controller.perft(depth); // Use hashing by default for CLI
-            let mut total = 0;
-            for (m, c) in &moves {
-                println!("{}: {}", m.unparse(), c);
-                total += c;
-            }
-            println!("\nNodes: {}", total);
-            return;
-        }
-    }
-
-    // Interactive mode
+    // Interactive UCI mode
     loop {
         let input = GUICommand::receive();
 
-        // Common commands
-        match (&input, controller.mode.is_some()) {
-            (Some(GUICommand::Quit), _) => break,
-            (Some(GUICommand::Position(fen)), true) => {
-                match fen {
-                    None => controller.new_game(),
-                    Some(fen) => controller.new_game_from_fen(fen.as_str()),
-                }
+        match input {
+            GUICommand::Quit => {
+                // Make sure to stop any ongoing search before quitting
+                controller.stop_search();
+                break;
+            }
+            GUICommand::UCI => {
+                let name = "Prokopakop";
+                let author = "Tomíno Komíno";
 
-                if let Some(ControllerMode::Play) = controller.mode {
-                    controller.print();
+                println!("id name {}", name);
+                println!("id author {}", author);
+                println!("uciok");
+
+                controller.initialize();
+            }
+            _ if !controller.is_initialized() => {
+                // Ignore commands until UCI initialization
+                continue;
+            }
+            GUICommand::FenPosition(fen) => controller.new_game_from_fen(fen.as_str()),
+            GUICommand::MovePosition(moves) => {
+                controller.new_game();
+
+                if let Some(moves_strings) = moves {
+                    for notation in moves_strings {
+                        match controller.try_move_piece(&notation) {
+                            MoveResultType::Success => (),
+                            MoveResultType::InvalidMove => {
+                                eprintln!("Invalid move: {}", notation);
+                            }
+                            MoveResultType::InvalidNotation => {
+                                eprintln!("Invalid notation format: {}", notation);
+                            }
+                        }
+                    }
                 }
             }
-            _ => {}
-        }
+            GUICommand::SetOption(name, value) => {
+                controller.set_option(name.as_str(), value.as_str())
+            }
+            GUICommand::IsReady => println!("readyok"),
+            GUICommand::Search(params) => controller.search(params),
+            GUICommand::Perft(depth_string) => {
+                let moves = controller.perft(depth_string.parse::<usize>().unwrap());
 
-        match controller.mode {
-            // UCI-only commands
-            Some(ControllerMode::UCI) => match input {
-                Some(GUICommand::SetOption(name, value)) => {
-                    controller.set_option(name.as_str(), value.as_str())
+                let mut total = 0;
+                for (m, c) in &moves {
+                    println!("{}: {}", m.unparse(), c);
+                    total += c;
                 }
-                Some(GUICommand::IsReady) => GUICommand::respond(BotCommand::ReadyOk),
-                Some(GUICommand::ValidMoves(depth_string)) => {
-                    let moves = controller.perft(depth_string.parse::<usize>().unwrap());
 
-                    let mut total = 0;
-                    for (m, c) in &moves {
-                        println!("{}: {}", m.unparse(), c);
-                        total += c;
-                    }
-
-                    println!("\nNodes: {}", total);
-                }
-                _ => {}
-            },
-            // Player-only commands
-            Some(ControllerMode::Play) => match input {
-                Some(GUICommand::Move(notation)) => {
-                    let result = controller.try_move_piece(notation);
-
-                    match result {
-                        MoveResultType::Success => controller.print(),
-                        _ => log::info!("{:?}", result),
-                    };
-                }
-                Some(GUICommand::Unmove) => {
-                    let result = controller.try_unmove_piece();
-
-                    match result {
-                        MoveResultType::Success => controller.print(),
-                        _ => log::info!("{:?}", result),
-                    };
-                }
-                Some(GUICommand::Status) => controller.print(),
-                Some(GUICommand::Fen) => controller.print_fen(),
-                Some(GUICommand::ValidMoves(square_or_depth_string)) => {
-                    // If parsing as move works, it has to be depth
-                    match BoardSquare::parse(square_or_depth_string.as_str()) {
-                        Some(square) => {
-                            let moves = controller.perft(0);
-
-                            let moves_to = moves
-                                .iter()
-                                .map(|(m, _)| m)
-                                .filter(|m| m.get_from() == square)
-                                .map(|&m| m.get_to())
-                                .collect::<Vec<_>>();
-
-                            controller.print_with_moves(moves_to);
-                        }
-                        None => {
-                            let moves = controller
-                                .perft(square_or_depth_string.parse::<usize>().unwrap_or(1));
-
-                            let mut total = 0;
-                            for (m, c) in &moves {
-                                println!("{}: {}", m.unparse(), c);
-                                total += c;
-                            }
-
-                            println!("\nNodes: {}", total);
-                        }
-                    }
-                }
-                _ => {}
-            },
-            None => match input {
-                Some(GUICommand::UCI) => {
-                    let name = "Prokopakop";
-                    let author = "Tomíno Komíno";
-
-                    GUICommand::respond(BotCommand::Identify(name.to_string(), author.to_string()));
-                    GUICommand::respond(BotCommand::UCIOk);
-
-                    controller.initialize(ControllerMode::UCI)
-                }
-                Some(GUICommand::Play) => {
-                    GUICommand::respond(BotCommand::PlayOk);
-
-                    controller.initialize(ControllerMode::Play);
-                    controller.print()
-                }
-                _ => {}
-            },
+                println!("\nNodes: {}", total);
+            }
+            GUICommand::Stop => controller.stop_search(),
+            GUICommand::Invalid(command) => eprintln!("Invalid command: {}", command),
         }
     }
 }

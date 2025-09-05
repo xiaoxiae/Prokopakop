@@ -1,4 +1,4 @@
-use std::ops::Not;
+use std::ops::{Mul, Not};
 use strum_macros::{EnumCount, EnumIter, FromRepr};
 
 // Do NOT fuck with these numbers since they are used for bit hacking
@@ -32,6 +32,17 @@ impl Not for Color {
     }
 }
 
+impl Mul<Color> for f32 {
+    type Output = f32;
+
+    fn mul(self, rhs: Color) -> Self::Output {
+        match rhs {
+            Color::Black => -self,
+            Color::White => self,
+        }
+    }
+}
+
 impl Piece {
     pub fn from_char(c: char) -> Option<Piece> {
         match c {
@@ -56,6 +67,7 @@ impl Piece {
         }
     }
 
+    #[allow(dead_code)]
     pub fn to_emoji(&self) -> char {
         // We change the color via Ansi codes
         match self {
