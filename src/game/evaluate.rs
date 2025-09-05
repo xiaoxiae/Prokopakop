@@ -175,7 +175,7 @@ pub fn evaluate_material(game: &Game) -> (f32, f32) {
         }
     }
 
-    (black, white)
+    (white, black)
 }
 
 pub fn evaluate_positional(game: &Game, game_phase: f32) -> f32 {
