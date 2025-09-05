@@ -119,8 +119,18 @@ impl SearchStats {
 pub fn print_uci_info(depth: usize, score: f32, pv: &[BoardMove], stats: &SearchStats) {
     let mut info = format!("info depth {}", depth);
 
-    // TODO: implement checkmate
-    info.push_str(&format!(" score cp {}", score));
+    // This will always be close because of PLY format
+    if score.abs() > CHECKMATE_SCORE - 1000.0 {
+        let moves_to_mate = (CHECKMATE_SCORE - score.abs()) as i32;
+
+        if score > 0.0 {
+            info.push_str(&format!(" score mate {}", moves_to_mate));
+        } else {
+            info.push_str(&format!(" score mate -{}", moves_to_mate));
+        }
+    } else {
+        info.push_str(&format!(" score cp {}", (score * 100.0) as i32));
+    }
 
     // Add nodes
     info.push_str(&format!(" nodes {}", stats.nodes.load(Ordering::Relaxed)));
@@ -156,7 +166,7 @@ pub fn iterative_deepening(
         let result = alpha_beta(
             game,
             depth,
-            0,
+            1,
             -f32::INFINITY,
             f32::INFINITY,
             &stop_flag,
@@ -188,18 +198,18 @@ fn alpha_beta(
 ) -> SearchResult {
     stats.increment_nodes();
     if stats.should_stop(&limits, &stop_flag) {
-        return SearchResult::leaf(game.evaluate());
+        return SearchResult::leaf(game.evaluate() * game.side);
     }
 
     // TODO: quiescence search
     if depth == 0 {
-        return SearchResult::leaf(game.evaluate());
+        return SearchResult::leaf(game.evaluate() * game.side);
     }
 
     let (move_count, moves) = game.get_moves();
 
     if move_count == 0 {
-        if game.is_king_in_check(!game.side) {
+        if game.is_king_in_check(game.side) {
             return SearchResult::leaf(-CHECKMATE_SCORE + ply as f32);
         } else {
             return SearchResult::leaf(0.0);

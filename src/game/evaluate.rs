@@ -1,7 +1,7 @@
 use crate::game::board::Game;
 use crate::game::pieces::{Color, Piece};
 
-pub const CHECKMATE_SCORE: f32 = 100_000.0;
+pub const CHECKMATE_SCORE: f32 = 100_000_000.0;
 
 pub const PAWN_VALUE: f32 = 100.0;
 pub const KNIGHT_VALUE: f32 = 320.0;
