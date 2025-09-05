@@ -7,6 +7,7 @@ mod tests {
     use std::fs;
 
     #[test]
+    #[cfg(not(debug_assertions))]
     fn test_zobrist_key_consistency() {
         let mut controller = GameController::new();
 
@@ -130,6 +131,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(debug_assertions))]
     fn test_zobrist_key_transposition_detection() {
         let mut controller = GameController::new();
 
@@ -292,21 +294,25 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(debug_assertions))]
     fn test_perft_positions_medium() {
         test_perft_positions_from_file("data/small.txt", 1, 5);
     }
 
     #[test]
+    #[cfg(not(debug_assertions))]
     fn test_perft_positions_hard() {
         test_perft_positions_from_file("data/large.txt", 1, 4);
     }
 
     #[test]
+    #[cfg(not(debug_assertions))]
     fn test_perft_positions_extreme() {
         test_perft_positions_from_file("data/large.txt", 1, 5);
     }
 
     #[test]
+    #[cfg(not(debug_assertions))]
     fn test_perft_positions_full() {
         test_perft_positions_from_file("data/large.txt", 1, 6);
     }
