@@ -165,7 +165,7 @@ pub fn evaluate_material(game: &Game) -> (f32, f32) {
     let mut white = 0.0;
     let mut black = 0.0;
 
-    // Sum up material for both sides
+    // TODO: bitboard eval, not for-loop
     for square_option in &game.pieces {
         if let Some((piece, color)) = square_option {
             match color {
@@ -181,7 +181,7 @@ pub fn evaluate_material(game: &Game) -> (f32, f32) {
 pub fn evaluate_positional(game: &Game, game_phase: f32) -> f32 {
     let mut positional = 0.0;
 
-    // Sum up positional values for both sides
+    // TODO: bitboard eval, not for-loop
     for (square, square_option) in game.pieces.iter().enumerate() {
         if let Some((piece, color)) = square_option {
             let position_value = get_position_value(*piece, square, *color, game_phase);
