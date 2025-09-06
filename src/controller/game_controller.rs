@@ -1,6 +1,7 @@
 use crate::game::board::{BoardMove, BoardMoveExt, Game};
 use crate::game::pieces::Color;
-use crate::game::search::{SearchLimits, iterative_deepening};
+use crate::game::search::{self, SearchLimits, iterative_deepening};
+use crate::game::table::TranspositionTable;
 
 use fxhash::FxHashMap;
 use std::sync::{
@@ -403,7 +404,9 @@ impl GameController {
 
         let mut game_clone = self.game.clone();
         let stop_flag = Arc::clone(&self.stop_flag);
+
         let move_overhead = self.move_overhead;
+        let hash_table_size = self.hash_table_size;
 
         let handle = thread::spawn(move || {
             let limits = SearchLimits {
@@ -414,7 +417,8 @@ impl GameController {
                 infinite: search_params.infinite,
             };
 
-            let result = iterative_deepening(&mut game_clone, limits, stop_flag);
+            let mut tt = TranspositionTable::new(hash_table_size);
+            let result = iterative_deepening(&mut game_clone, limits, stop_flag, &mut tt);
 
             // Output the best move in UCI format
             println!("bestmove {}", result.best_move.unparse());

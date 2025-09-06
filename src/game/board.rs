@@ -265,8 +265,8 @@ pub struct Game {
     castling_flags: u8, // 0x0000KQkq, where kq/KQ is one if black/white king and queen
     en_passant_bitmap: Bitboard, // if a piece just moved for the first time, 1 will be over the square
 
-    color_bitboards: [Bitboard; Color::COUNT],
-    piece_bitboards: [Bitboard; Piece::COUNT],
+    pub color_bitboards: [Bitboard; Color::COUNT],
+    pub piece_bitboards: [Bitboard; Piece::COUNT],
 
     all_pieces: Bitboard,
 
@@ -1439,6 +1439,29 @@ impl Game {
                 self.get_king_position_const::<ConstBlack>(),
             ),
         }
+    }
+
+    pub(crate) fn is_capture(&self, board_move: BoardMove) -> bool {
+        // Check if there's a piece at the destination
+        if self.pieces[board_move.get_to() as usize].is_some() {
+            return true;
+        }
+
+        // Check for en passant capture
+        if let Some((piece, _)) = self.pieces[board_move.get_from() as usize] {
+            if piece == Piece::Pawn && self.en_passant_bitmap.is_set(board_move.get_to()) {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    pub(crate) fn is_check(&mut self, board_move: BoardMove) -> bool {
+        self.make_move(board_move);
+        let is_check = self.is_king_in_check(!self.side); // Check opponent's king (side was flipped in make_move)
+        self.unmake_move();
+        is_check
     }
 
     pub(crate) fn evaluate(&self) -> f32 {

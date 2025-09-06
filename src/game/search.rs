@@ -8,6 +8,7 @@ use std::time::Instant;
 use crate::game::board::{BoardMove, BoardMoveExt, Game};
 use crate::game::evaluate::{CHECKMATE_SCORE, get_piece_value};
 use crate::game::pieces::Piece;
+use crate::game::table::{GameTranspositionExt, NodeType, TranspositionTable};
 
 #[derive(Debug, Clone)]
 pub struct SearchResult {
@@ -157,10 +158,14 @@ pub fn iterative_deepening(
     game: &mut Game,
     limits: SearchLimits,
     stop_flag: Arc<AtomicBool>,
+    tt: &mut TranspositionTable,
 ) -> SearchResult {
     let stats = Arc::new(SearchStats::new());
     let mut best_result = SearchResult::leaf(0.0);
     let mut previous_pv: Vec<BoardMove> = Vec::new();
+
+    // Start new search generation
+    tt.new_search();
 
     for depth in 1..=limits.max_depth.unwrap_or(256) {
         stats.current_depth.store(depth as u64, Ordering::Relaxed);
@@ -175,6 +180,7 @@ pub fn iterative_deepening(
             &stop_flag,
             &stats,
             &limits,
+            tt,
         );
 
         if !stats.should_stop(&limits, &stop_flag) {
@@ -194,15 +200,52 @@ fn alpha_beta(
     depth: usize,
     ply: usize,
     mut alpha: f32,
-    beta: f32,
+    mut beta: f32,
     previous_pv: &[BoardMove],
     stop_flag: &Arc<AtomicBool>,
     stats: &Arc<SearchStats>,
     limits: &SearchLimits,
+    tt: &mut TranspositionTable,
 ) -> SearchResult {
     stats.increment_nodes();
     if stats.should_stop(&limits, &stop_flag) {
         return SearchResult::leaf(game.evaluate() * game.side);
+    }
+
+    let original_alpha = alpha;
+    let zobrist_key = game.get_zobrist_key();
+
+    // Probe transposition table
+    let mut tt_move = None;
+    if let Some(tt_entry) = tt.probe(zobrist_key) {
+        tt_move = Some(tt_entry.best_move);
+
+        // Use TT value if depth is sufficient
+        if tt_entry.depth >= depth as u8 {
+            match tt_entry.node_type {
+                NodeType::Exact => {
+                    // Exact score - we can return immediately
+                    return SearchResult::with_pv(
+                        tt_entry.best_move,
+                        tt_entry.evaluation,
+                        Vec::new(),
+                    );
+                }
+                NodeType::LowerBound => {
+                    // Beta cutoff occurred, evaluation is a lower bound
+                    alpha = alpha.max(tt_entry.evaluation);
+                }
+                NodeType::UpperBound => {
+                    // No move improved alpha, evaluation is an upper bound
+                    beta = beta.min(tt_entry.evaluation);
+                }
+            }
+
+            // Check for alpha-beta cutoff after adjusting bounds
+            if alpha >= beta {
+                return SearchResult::with_pv(tt_entry.best_move, tt_entry.evaluation, Vec::new());
+            }
+        }
     }
 
     // Enter quiescence search to remove the horizon effect
@@ -213,15 +256,26 @@ fn alpha_beta(
     let (move_count, mut moves) = game.get_moves();
 
     if move_count == 0 {
-        if game.is_king_in_check(game.side) {
-            return SearchResult::leaf(-CHECKMATE_SCORE + ply as f32);
+        let eval = if game.is_king_in_check(game.side) {
+            -CHECKMATE_SCORE + ply as f32
         } else {
-            return SearchResult::leaf(0.0);
-        }
+            0.0
+        };
+
+        tt.store(
+            zobrist_key,
+            depth as u8,
+            eval,
+            BoardMove::empty(),
+            NodeType::Exact,
+        );
+
+        return SearchResult::leaf(eval);
     }
 
-    // Order moves with PV first
-    order_moves_with_pv(game, &mut moves[0..move_count], previous_pv.get(0).copied());
+    // Order moves with TT move and PV
+    let pv_move = previous_pv.get(0).copied();
+    order_moves_with_tt_and_pv(game, &mut moves[0..move_count], tt_move, pv_move);
 
     let mut best_move = BoardMove::empty();
     let mut best_value = -f32::INFINITY;
@@ -247,6 +301,7 @@ fn alpha_beta(
             stop_flag,
             stats,
             limits,
+            tt,
         );
         game.unmake_move();
 
@@ -263,6 +318,17 @@ fn alpha_beta(
             break; // Beta cutoff
         }
     }
+
+    // Store in transposition table
+    let node_type = if best_value <= original_alpha {
+        NodeType::UpperBound // No move improved alpha
+    } else if best_value >= beta {
+        NodeType::LowerBound // Beta cutoff
+    } else {
+        NodeType::Exact // Exact value
+    };
+
+    tt.store(zobrist_key, depth as u8, best_value, best_move, node_type);
 
     SearchResult::with_pv(best_move, best_value, best_pv)
 }
@@ -301,7 +367,7 @@ fn quiescence_search(
     }
 
     // Get all moves
-    let (move_count, mut moves) = game.get_moves();
+    let (move_count, moves) = game.get_moves();
 
     // If no moves available, check for checkmate or stalemate
     if move_count == 0 {
@@ -315,7 +381,7 @@ fn quiescence_search(
     // Filter to only captures (and optionally checks)
     let mut capture_moves = Vec::new();
     for i in 0..move_count {
-        if is_capture(game, &moves[i]) || is_check_move(game, &moves[i]) {
+        if game.is_capture(moves[i]) || game.is_check(moves[i]) {
             capture_moves.push(moves[i]);
         }
     }
@@ -365,21 +431,12 @@ fn quiescence_search(
     }
 }
 
-// TODO: to board
-fn is_capture(game: &Game, board_move: &BoardMove) -> bool {
-    game.pieces[board_move.get_to() as usize].is_some()
-}
-
-// TODO: to board
-fn is_check_move(game: &mut Game, board_move: &BoardMove) -> bool {
-    // Make the move temporarily to check if it gives check
-    game.make_move(*board_move);
-    let gives_check = game.is_king_in_check(!game.side); // Check if opponent's king is in check
-    game.unmake_move();
-    gives_check
-}
-
-fn order_moves_with_pv(game: &Game, moves: &mut [BoardMove], pv_move: Option<BoardMove>) {
+fn order_moves_with_tt_and_pv(
+    game: &Game,
+    moves: &mut [BoardMove],
+    tt_move: Option<BoardMove>,
+    pv_move: Option<BoardMove>,
+) {
     // First, sort by MVV-LVA
     moves.sort_unstable_by(|a, b| {
         let score_a = mvv_lva_score(game, a);
@@ -387,11 +444,37 @@ fn order_moves_with_pv(game: &Game, moves: &mut [BoardMove], pv_move: Option<Boa
         score_b.cmp(&score_a)
     });
 
-    // If we have a PV move, find it and move it to the front
-    if let Some(pv) = pv_move {
-        if let Some(pv_index) = moves.iter().position(|&m| m == pv) {
-            // Move the PV move to the front by rotating
-            moves[0..=pv_index].rotate_right(1);
+    // Find indices of special moves
+    let pv_index = pv_move.and_then(|pv| moves.iter().position(|&m| m == pv));
+    let tt_index = tt_move.and_then(|tt| {
+        if Some(tt) != pv_move {
+            moves.iter().position(|&m| m == tt)
+        } else {
+            None
+        }
+    });
+
+    // Move PV to front if it exists
+    if let Some(idx) = pv_index {
+        // Rotate to bring PV move to front
+        moves[0..=idx].rotate_right(1);
+    }
+
+    // Move TT to second position if it exists and is different from PV
+    if let Some(idx) = tt_index {
+        // Adjust index if PV was moved
+        let adjusted_idx = if pv_index.is_some() && idx > pv_index.unwrap() {
+            idx
+        } else if pv_index.is_some() && idx < pv_index.unwrap() {
+            idx + 1
+        } else {
+            idx
+        };
+
+        // Rotate to bring TT move to position 1 (or 0 if no PV)
+        let start_pos = if pv_index.is_some() { 1 } else { 0 };
+        if adjusted_idx >= start_pos {
+            moves[start_pos..=adjusted_idx].rotate_right(1);
         }
     }
 }
