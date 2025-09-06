@@ -2,11 +2,6 @@
 
 A moderately fast UCI chess engine written in Rust that **kops the Prokop**.
 
-<figure>
-    <img src="scripts/plots/nps_plot.png" alt="Performance Across Commits" width="100%">
-    <figcaption><em>Performance benchmarks across git commits on a i9-14900K. Benchmarks use perft 5, hashing and bulk-counting.</em></figcaption>
-</figure>
-
 ## Technical Features
 
 ### Move Generation
@@ -15,10 +10,23 @@ A moderately fast UCI chess engine written in Rust that **kops the Prokop**.
 - **[Generics](https://www.chessprogramming.org/Generic_Programming)** - Const generics for piece/color function variants
 - **Iterative [Zobrist Hashing](https://www.chessprogramming.org/Zobrist_Hashing)** - Position hashing for transposition tables
 
+<figure>
+    <img src="scripts/benchmark.png" alt="Performance Across Commits" width="100%">
+    <figcaption><em>Performance benchmarks across git commits on a i9-14900K. Benchmarks use perft 5, hashing and bulk-counting.</em></figcaption>
+</figure>
+
 ### Search + Evaluation
 
 - **[Alpha-Beta](https://www.chessprogramming.org/Alpha-Beta) Search** via **[Negamax](https://www.chessprogramming.org/Negamax)** - Negamax search with alpha-beta pruning
 - **[Iterative Deepening](https://www.chessprogramming.org/Iterative_Deepening)** - Progressive search depth
+- **[Move Ordering](https://www.chessprogramming.org/Move_Ordering)** - Principal Variation (PV) moves first, then Most Valuable Victim - Least Valuable Attacker (MVV-LVA)
+- **[Quiescence Search](https://www.chessprogramming.org/Quiescence_Search)** - to avoid horizon effect
+- **[Transposition Table](https://www.chessprogramming.org/Transposition_Table)** - Position caching to avoid re-searching identical positions
+
+<figure>
+    <img src="scripts/tournament.png" alt="Tournament Results Heatmap" width="100%">
+    <figcaption><em>Tournament results heatmap showing win rates between different engine versions. Each cell shows the win rate of the row engine against the column engine.</em></figcaption>
+</figure>
 
 ## Usage
 

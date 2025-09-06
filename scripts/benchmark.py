@@ -396,7 +396,7 @@ class ChessEngineBenchmark:
         ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{x:,.0f}'))
         ax.legend()
         plt.tight_layout()
-        plt.savefig("nps_plot.png", dpi=300, bbox_inches='tight')
+        plt.savefig("benchmark.png", dpi=300, bbox_inches='tight')
         plt.close(fig)
 
     def print_summary(self):
