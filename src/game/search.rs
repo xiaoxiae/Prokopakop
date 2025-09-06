@@ -7,7 +7,7 @@ use std::time::Instant;
 
 use crate::game::board::{BoardMove, BoardMoveExt, Game};
 use crate::game::evaluate::{CHECKMATE_SCORE, get_piece_value};
-use crate::game::pieces::{ColoredPiece, Piece};
+use crate::game::pieces::Piece;
 
 #[derive(Debug, Clone)]
 pub struct SearchResult {
@@ -205,9 +205,9 @@ fn alpha_beta(
         return SearchResult::leaf(game.evaluate() * game.side);
     }
 
-    // TODO: quiescence search
+    // Enter quiescence search to remove the horizon effect
     if depth == 0 {
-        return SearchResult::leaf(game.evaluate() * game.side);
+        return quiescence_search(game, ply, alpha, beta, stop_flag, stats, limits);
     }
 
     let (move_count, mut moves) = game.get_moves();
@@ -267,7 +267,118 @@ fn alpha_beta(
     SearchResult::with_pv(best_move, best_value, best_pv)
 }
 
-/// Order moves with PV move first, then MVV-LVA for captures
+fn quiescence_search(
+    game: &mut Game,
+    ply: usize,
+    mut alpha: f32,
+    beta: f32,
+    stop_flag: &Arc<AtomicBool>,
+    stats: &Arc<SearchStats>,
+    limits: &SearchLimits,
+) -> SearchResult {
+    stats.increment_nodes();
+
+    if stats.should_stop(&limits, &stop_flag) {
+        return SearchResult::leaf(game.evaluate() * game.side);
+    }
+
+    // Limit quiescence search depth to prevent explosion
+    const MAX_QUIESCENCE_PLY: usize = 32;
+    if ply > MAX_QUIESCENCE_PLY {
+        return SearchResult::leaf(game.evaluate() * game.side);
+    }
+
+    let stand_pat = game.evaluate() * game.side;
+
+    // If we're already doing well enough to cause a beta cutoff, we can return
+    if stand_pat >= beta {
+        return SearchResult::leaf(beta);
+    }
+
+    // Update alpha with standing pat score
+    if stand_pat > alpha {
+        alpha = stand_pat;
+    }
+
+    // Get all moves
+    let (move_count, mut moves) = game.get_moves();
+
+    // If no moves available, check for checkmate or stalemate
+    if move_count == 0 {
+        if game.is_king_in_check(game.side) {
+            return SearchResult::leaf(-CHECKMATE_SCORE + ply as f32);
+        } else {
+            return SearchResult::leaf(0.0);
+        }
+    }
+
+    // Filter to only captures (and optionally checks)
+    let mut capture_moves = Vec::new();
+    for i in 0..move_count {
+        if is_capture(game, &moves[i]) || is_check_move(game, &moves[i]) {
+            capture_moves.push(moves[i]);
+        }
+    }
+
+    // If no captures/checks available, return the standing pat evaluation
+    if capture_moves.is_empty() {
+        return SearchResult::leaf(stand_pat);
+    }
+
+    // Order captures by MVV-LVA
+    capture_moves.sort_unstable_by(|a, b| {
+        let score_a = mvv_lva_score(game, a);
+        let score_b = mvv_lva_score(game, b);
+        score_b.cmp(&score_a)
+    });
+
+    let mut best_value = stand_pat;
+    let mut best_move = BoardMove::empty();
+    let mut best_pv = Vec::new();
+
+    for board_move in capture_moves.iter() {
+        game.make_move(*board_move);
+
+        let result = quiescence_search(game, ply + 1, -beta, -alpha, stop_flag, stats, limits);
+
+        game.unmake_move();
+
+        let value = -result.evaluation;
+
+        if value > best_value {
+            best_value = value;
+            best_move = *board_move;
+            best_pv = result.pv;
+        }
+
+        alpha = alpha.max(value);
+        if alpha >= beta {
+            break; // Beta cutoff
+        }
+    }
+
+    // Return the best result found
+    if best_move == BoardMove::empty() {
+        SearchResult::leaf(best_value)
+    } else {
+        SearchResult::with_pv(best_move, best_value, best_pv)
+    }
+}
+
+// TODO: to board
+fn is_capture(game: &Game, board_move: &BoardMove) -> bool {
+    game.pieces[board_move.get_to() as usize].is_some()
+}
+
+// TODO: to board
+fn is_check_move(game: &mut Game, board_move: &BoardMove) -> bool {
+    // Make the move temporarily to check if it gives check
+    game.make_move(*board_move);
+    let gives_check = game.is_king_in_check(!game.side); // Check if opponent's king is in check
+    game.unmake_move();
+    gives_check
+}
+
 fn order_moves_with_pv(game: &Game, moves: &mut [BoardMove], pv_move: Option<BoardMove>) {
     // First, sort by MVV-LVA
     moves.sort_unstable_by(|a, b| {
@@ -285,13 +396,10 @@ fn order_moves_with_pv(game: &Game, moves: &mut [BoardMove], pv_move: Option<Boa
     }
 }
 
-/// https://www.chessprogramming.org/MVV-LVA
 fn mvv_lva_score(game: &Game, board_move: &BoardMove) -> i32 {
     if let Some((victim_piece, _victim_color)) = game.pieces[board_move.get_to() as usize] {
-        // Get the attacking piece
         if let Some((attacker_piece, _attacker_color)) = game.pieces[board_move.get_from() as usize]
         {
-            // Get values from the evaluate module
             let victim_value = get_piece_value(victim_piece);
             let attacker_value = get_piece_value(attacker_piece);
 
