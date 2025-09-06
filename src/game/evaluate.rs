@@ -1,5 +1,8 @@
+use strum::EnumCount;
+
 use crate::game::board::Game;
 use crate::game::pieces::{Color, Piece};
+use crate::utils::bitboard::BitboardExt;
 
 pub const CHECKMATE_SCORE: f32 = 100_000_000.0;
 
@@ -165,14 +168,20 @@ pub fn evaluate_material(game: &Game) -> (f32, f32) {
     let mut white = 0.0;
     let mut black = 0.0;
 
-    // TODO: bitboard eval, not for-loop
-    for square_option in &game.pieces {
-        if let Some((piece, color)) = square_option {
-            match color {
-                Color::White => white += get_piece_value(*piece),
-                Color::Black => black += get_piece_value(*piece),
-            }
-        }
+    // Use bitboard operations instead of for-loop
+    for piece in 0..Piece::COUNT {
+        let piece_type = Piece::from_repr(piece).unwrap();
+        let piece_value = get_piece_value(piece_type);
+
+        // Count white pieces of this type
+        let white_pieces =
+            game.piece_bitboards[piece] & game.color_bitboards[Color::White as usize];
+        white += white_pieces.count_ones() as f32 * piece_value;
+
+        // Count black pieces of this type
+        let black_pieces =
+            game.piece_bitboards[piece] & game.color_bitboards[Color::Black as usize];
+        black += black_pieces.count_ones() as f32 * piece_value;
     }
 
     (white, black)
@@ -181,11 +190,26 @@ pub fn evaluate_material(game: &Game) -> (f32, f32) {
 pub fn evaluate_positional(game: &Game, game_phase: f32) -> f32 {
     let mut positional = 0.0;
 
-    // TODO: bitboard eval, not for-loop
-    for (square, square_option) in game.pieces.iter().enumerate() {
-        if let Some((piece, color)) = square_option {
-            let position_value = get_position_value(*piece, square, *color, game_phase);
-            positional += position_value * *color;
+    // Use bitboard operations instead of for-loop
+    for piece in 0..Piece::COUNT {
+        let piece_type = Piece::from_repr(piece).unwrap();
+
+        // Evaluate white pieces of this type
+        let white_pieces =
+            game.piece_bitboards[piece] & game.color_bitboards[Color::White as usize];
+        for square in white_pieces.iter_positions() {
+            let position_value =
+                get_position_value(piece_type, square as usize, Color::White, game_phase);
+            positional += position_value;
+        }
+
+        // Evaluate black pieces of this type
+        let black_pieces =
+            game.piece_bitboards[piece] & game.color_bitboards[Color::Black as usize];
+        for square in black_pieces.iter_positions() {
+            let position_value =
+                get_position_value(piece_type, square as usize, Color::Black, game_phase);
+            positional -= position_value; // Subtract for black pieces
         }
     }
 
