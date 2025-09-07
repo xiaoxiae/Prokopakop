@@ -50,7 +50,7 @@ def find_master_binary():
     return None
 
 
-def build_fastchess_command(commit_names, add_master=False):
+def build_fastchess_command(commit_names, add_master=False, duel=False):
     """
     Build the fastchess command with multiple engines based on commit names.
     """
@@ -72,6 +72,9 @@ def build_fastchess_command(commit_names, add_master=False):
 
     # Add engine parameters for each commit
     for i, commit_name in enumerate(commit_names):
+        if duel and (i < len(commit_names) - (0 if not add_master else 1)):
+            continue
+
         binary_path = find_binary(commit_name)
         if binary_path is None:
             print(f"Error: Could not find binary for commit {commit_name}")
@@ -97,11 +100,11 @@ def build_fastchess_command(commit_names, add_master=False):
     return cmd
 
 
-def run_fastchess(commit_names, add_master=False):
+def run_fastchess(commit_names, add_master=False, duel=False):
     """
     Run fastchess with the specified commit engines.
     """
-    command = build_fastchess_command(commit_names, add_master)
+    command = build_fastchess_command(commit_names, add_master, duel)
 
     print("Running fastchess with the following command:")
     print(" ".join(command))
@@ -157,7 +160,7 @@ def generate_heatmap(results_file="scripts/tournament_results.json", add_master=
             engines.add(parts[1])
 
     # Sort engines by their index number (newer engines have lower indices)
-    engine_list = sorted(list(engines), key=lambda x: int(x.split('-')[-1]))
+    engine_list = sorted(list(engines), key=lambda x: int(x.split('-')[-1]) if x != 'master' else -1)
 
     # Create a matrix for the heatmap
     n = len(engine_list)
@@ -217,10 +220,14 @@ def main():
                        help="Include the current prokopakop binary (master) in the tournament")
     parser.add_argument("--heatmap-only", action="store_true",
                        help="Only generate the heatmap from existing results without running tournament")
+    parser.add_argument("--duel", action="store_true",
+                       help="Run a duel between only the two most recent commits (and master if --add-master is specified)")
     parser.add_argument("--results-file", default="scripts/tournament_results.json",
                        help="Path to the tournament results JSON file")
 
     args = parser.parse_args()
+
+    commits_to_use = COMMIT_NAMES
 
     if args.heatmap_only:
         # Just generate the heatmap from existing results
@@ -228,25 +235,26 @@ def main():
         generate_heatmap(args.results_file, args.add_master)
     else:
         # Run the tournament
-        total_engines = len(COMMIT_NAMES)
+        total_engines = len(commits_to_use)
         if args.add_master:
             total_engines += 1
 
-        print(f"Setting up fastchess tournament with {total_engines} engines:")
+        tournament_type = "duel" if args.duel else "tournament"
+        print(f"Setting up fastchess {tournament_type} with {total_engines} engines:")
 
         if args.add_master:
             print("  master (target/release/prokopakop)")
 
-        for i, commit in enumerate(COMMIT_NAMES):
+        for i, commit in enumerate(commits_to_use):
             print(f"  {i}. {commit} (target/release/prokopakop-{commit})")
         print()
 
         # Run fastchess
-        exit_code = run_fastchess(COMMIT_NAMES, args.add_master)
+        exit_code = run_fastchess(commits_to_use, args.add_master, args.duel)
 
         if exit_code == 0:
             # Generate heatmap after successful tournament
-            print("\nGenerating performance heatmap...")
+            print(f"\nGenerating performance heatmap for {tournament_type}...")
             generate_heatmap(args.results_file, args.add_master)
 
         sys.exit(exit_code)
