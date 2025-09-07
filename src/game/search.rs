@@ -161,16 +161,26 @@ impl PositionHistory {
 pub fn print_uci_info(depth: usize, score: f32, pv: &[BoardMove], stats: &SearchStats) {
     let mut info = format!("info depth {}", depth);
 
-    // This will always be close because of PLY format
+    // Check if this is a checkmate score
     if score.abs() > CHECKMATE_SCORE - 1000.0 {
-        let moves_to_mate = (CHECKMATE_SCORE - score.abs()) as i32;
+        // Calculate moves to mate (converting from plies to moves)
+        let plies_to_mate = (CHECKMATE_SCORE - score.abs()) as i32;
 
-        if score > 0.0 {
+        // Convert plies to moves (round up)
+        let moves_to_mate = (plies_to_mate + 1) / 2;
+
+        // Handle the special case of already being in checkmate
+        if moves_to_mate == 0 {
+            info.push_str(" score mate 0");
+        } else if score > 0.0 {
+            // We're winning - delivering checkmate
             info.push_str(&format!(" score mate {}", moves_to_mate));
         } else {
+            // We're losing - being checkmated
             info.push_str(&format!(" score mate -{}", moves_to_mate));
         }
     } else {
+        // Regular centipawn score
         info.push_str(&format!(" score cp {}", (score * 100.0) as i32));
     }
 
@@ -247,6 +257,11 @@ pub fn iterative_deepening(
             print_uci_info(depth, result.evaluation, &result.pv, &stats);
             best_result = result.clone();
             previous_pv = result.pv;
+
+            // If we found a checkmate, stop searching deeper
+            if result.evaluation.abs() > CHECKMATE_SCORE - 1000.0 {
+                break;
+            }
         } else {
             break;
         }

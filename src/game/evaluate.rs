@@ -4,7 +4,10 @@ use crate::game::board::Game;
 use crate::game::pieces::{Color, Piece};
 use crate::utils::bitboard::BitboardExt;
 
-pub const CHECKMATE_SCORE: f32 = 100_000_000.0;
+// Do not increase this! We're using it to count moves to checkmate
+// by incrementing via PLY and subtract later. Incrementing this too much
+// will make it loose precision and the PLY info.
+pub const CHECKMATE_SCORE: f32 = 100_000.0;
 
 pub const PAWN_VALUE: f32 = 100.0;
 pub const KNIGHT_VALUE: f32 = 320.0;
