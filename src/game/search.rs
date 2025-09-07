@@ -8,7 +8,7 @@ use std::time::Instant;
 use fxhash::FxHashMap;
 
 use crate::game::board::{BoardMove, BoardMoveExt, Game};
-use crate::game::evaluate::{CHECKMATE_SCORE, get_piece_value};
+use crate::game::evaluate::{CHECKMATE_SCORE, QUEEN_VALUE, get_piece_value};
 use crate::game::opening_book::OpeningBook;
 use crate::game::pieces::Piece;
 use crate::game::table::{GameTranspositionExt, NodeType, TranspositionTable};
@@ -424,6 +424,30 @@ fn alpha_beta(
     SearchResult::with_pv(best_move, best_value, best_pv)
 }
 
+fn calculate_delta_margin(game: &Game, board_move: &BoardMove) -> f32 {
+    let mut max_gain = 0.0;
+
+    // Add value of captured piece
+    if let Some((victim_piece, _victim_color)) = game.pieces[board_move.get_to() as usize] {
+        max_gain += if victim_piece == Piece::King {
+            10000.0 // Very high value for capturing a king
+        } else {
+            get_piece_value(victim_piece)
+        };
+    }
+
+    if let Some((attacker_piece, _attacker_color)) = game.pieces[board_move.get_from() as usize] {
+        if attacker_piece == Piece::Pawn {
+            let to_rank = board_move.get_to() / 8;
+            if to_rank == 0 || to_rank == 7 {
+                max_gain += QUEEN_VALUE - get_piece_value(Piece::Pawn);
+            }
+        }
+    }
+
+    max_gain
+}
+
 fn quiescence_search(
     game: &mut Game,
     ply: usize,
@@ -457,6 +481,9 @@ fn quiescence_search(
         alpha = stand_pat;
     }
 
+    // Delta pruning margin - add a small safety buffer
+    const DELTA_MARGIN: f32 = 50.0; // About half a pawn
+
     // Get all moves
     let (move_count, moves) = game.get_moves();
 
@@ -469,11 +496,24 @@ fn quiescence_search(
         }
     }
 
-    // Filter to only captures (and optionally checks)
+    // Filter to only captures (and optionally checks) with delta pruning
     let mut capture_moves = Vec::new();
     for i in 0..move_count {
-        if game.is_capture(moves[i]) || game.is_check(moves[i]) {
-            capture_moves.push(moves[i]);
+        let board_move = moves[i];
+
+        if game.is_capture(board_move) || game.is_check(board_move) {
+            // Apply delta pruning for captures only (not for checks)
+            if game.is_capture(board_move) {
+                let max_gain = calculate_delta_margin(game, &board_move);
+
+                // Delta pruning: if even the best possible outcome can't improve alpha,
+                // skip this move
+                if stand_pat + max_gain + DELTA_MARGIN < alpha {
+                    continue; // Prune this move
+                }
+            }
+
+            capture_moves.push(board_move);
         }
     }
 
