@@ -1,4 +1,4 @@
-# Prokopakop
+# <img src="assets/logo.png" alt="Prokopakop Logo" width="48" height="48" align="top"> Prokopakop
 
 A moderately fast UCI chess engine written in Rust that **kops the Prokop**.
 
