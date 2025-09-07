@@ -46,6 +46,49 @@ impl SearchResult {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct KillerMoves {
+    // 2 killer moves per ply
+    killers: Vec<[BoardMove; 2]>,
+}
+
+impl KillerMoves {
+    pub fn new(max_ply: usize) -> Self {
+        Self {
+            killers: vec![[BoardMove::empty(); 2]; max_ply],
+        }
+    }
+
+    /// Add a killer move at the given ply
+    pub fn add_killer(&mut self, ply: usize, board_move: BoardMove) {
+        if ply >= self.killers.len() {
+            return;
+        }
+
+        if self.killers[ply][0] == board_move {
+            return;
+        }
+
+        self.killers[ply][1] = self.killers[ply][0];
+        self.killers[ply][0] = board_move;
+    }
+
+    pub fn get_killers(&self, ply: usize) -> [BoardMove; 2] {
+        if ply < self.killers.len() {
+            self.killers[ply].clone()
+        } else {
+            [BoardMove::default(); 2]
+        }
+    }
+
+    pub fn clear(&mut self) {
+        for killers in &mut self.killers {
+            killers[0] = BoardMove::empty();
+            killers[1] = BoardMove::empty();
+        }
+    }
+}
+
 /// Search limits and parameters
 #[derive(Clone, Debug)]
 #[allow(dead_code)]
@@ -236,8 +279,15 @@ pub fn iterative_deepening(
     // Start new search generation
     tt.new_search();
 
+    // Initialize killer moves table
+    let mut killer_moves = KillerMoves::new(256);
+
     for depth in 1..=limits.max_depth.unwrap_or(256) {
         stats.current_depth.store(depth as u64, Ordering::Relaxed);
+
+        // Clear killer moves for each iteration to avoid move ordering pollution
+        // between iterations (optional - you might want to keep them)
+        killer_moves.clear();
 
         let result = alpha_beta(
             game,
@@ -251,6 +301,7 @@ pub fn iterative_deepening(
             &limits,
             tt,
             position_history,
+            &mut killer_moves,
         );
 
         if !stats.should_stop(&limits, &stop_flag) {
@@ -282,6 +333,7 @@ fn alpha_beta(
     limits: &SearchLimits,
     tt: &mut TranspositionTable,
     position_history: &mut PositionHistory,
+    killer_moves: &mut KillerMoves,
 ) -> SearchResult {
     stats.increment_nodes();
     if stats.should_stop(&limits, &stop_flag) {
@@ -356,9 +408,15 @@ fn alpha_beta(
         return SearchResult::leaf(eval);
     }
 
-    // Order moves with TT move and PV
+    // Order moves with TT, PV, and killer moves
     let pv_move = previous_pv.get(0).copied();
-    order_moves_with_tt_and_pv(game, &mut moves[0..move_count], tt_move, pv_move);
+    order_moves_with_heuristics(
+        game,
+        &mut moves[0..move_count],
+        tt_move,
+        pv_move,
+        killer_moves.get_killers(ply),
+    );
 
     let mut best_move = BoardMove::empty();
     let mut best_value = -f32::INFINITY;
@@ -390,6 +448,7 @@ fn alpha_beta(
             limits,
             tt,
             position_history,
+            killer_moves,
         );
 
         // Remove position from history after unmaking the move
@@ -406,7 +465,12 @@ fn alpha_beta(
 
         alpha = alpha.max(value);
         if alpha >= beta {
-            break; // Beta cutoff
+            // Update killer moves if this is a quiet move
+            // (captures use MVV-LVA ordering already)
+            if !game.is_capture(*board_move) {
+                killer_moves.add_killer(ply, *board_move);
+            }
+            break;
         }
     }
 
@@ -563,51 +627,52 @@ fn quiescence_search(
     }
 }
 
-fn order_moves_with_tt_and_pv(
+fn order_moves_with_heuristics(
     game: &Game,
     moves: &mut [BoardMove],
     tt_move: Option<BoardMove>,
     pv_move: Option<BoardMove>,
+    killer_moves: [BoardMove; 2],
 ) {
-    // First, sort by MVV-LVA
-    moves.sort_unstable_by(|a, b| {
-        let score_a = mvv_lva_score(game, a);
-        let score_b = mvv_lva_score(game, b);
-        score_b.cmp(&score_a)
-    });
+    // Assign scores to each move for sorting
+    let mut move_scores: Vec<(BoardMove, i32)> = moves
+        .iter()
+        .map(|&mv| {
+            let score;
 
-    // Find indices of special moves
-    let pv_index = pv_move.and_then(|pv| moves.iter().position(|&m| m == pv));
-    let tt_index = tt_move.and_then(|tt| {
-        if Some(tt) != pv_move {
-            moves.iter().position(|&m| m == tt)
-        } else {
-            None
-        }
-    });
+            // PV
+            if Some(mv) == pv_move {
+                score = 1_000_000;
+            }
+            // TT
+            else if Some(mv) == tt_move {
+                score = 900_000;
+            }
+            // Good captures (MVV-LVA)
+            else if game.is_capture(mv) {
+                score = 800_000 + mvv_lva_score(game, &mv);
+            }
+            // Killer moves
+            else if mv == killer_moves[0] {
+                score = 700_000;
+            } else if mv == killer_moves[1] {
+                score = 600_000;
+            }
+            // Other quiet moves are random
+            else {
+                score = 0;
+            }
 
-    // Move PV to front if it exists
-    if let Some(idx) = pv_index {
-        // Rotate to bring PV move to front
-        moves[0..=idx].rotate_right(1);
-    }
+            (mv, score)
+        })
+        .collect();
 
-    // Move TT to second position if it exists and is different from PV
-    if let Some(idx) = tt_index {
-        // Adjust index if PV was moved
-        let adjusted_idx = if pv_index.is_some() && idx > pv_index.unwrap() {
-            idx
-        } else if pv_index.is_some() && idx < pv_index.unwrap() {
-            idx + 1
-        } else {
-            idx
-        };
+    // Sort by score (highest first)
+    move_scores.sort_unstable_by(|a, b| b.1.cmp(&a.1));
 
-        // Rotate to bring TT move to position 1 (or 0 if no PV)
-        let start_pos = if pv_index.is_some() { 1 } else { 0 };
-        if adjusted_idx >= start_pos {
-            moves[start_pos..=adjusted_idx].rotate_right(1);
-        }
+    // Copy sorted moves back
+    for (i, (mv, _)) in move_scores.iter().enumerate() {
+        moves[i] = *mv;
     }
 }
 
