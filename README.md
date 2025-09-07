@@ -30,6 +30,7 @@ A moderately fast UCI chess engine written in Rust that **kops the Prokop**.
 - [Material](https://www.chessprogramming.org/Material)
 - [Piece-Square tables](https://www.chessprogramming.org/Piece-Square_Tables)
 - [Pawn Structure](https://www.chessprogramming.org/Pawn_Structure) (doubled pawns, passed pawns)
+- [Piece Mobility](https://www.chessprogramming.org/Mobility)
 
 
 <figure>

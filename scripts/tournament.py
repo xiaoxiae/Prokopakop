@@ -23,6 +23,7 @@ COMMIT_NAMES = [
     "ff14c29",  # faster eval
     "7ff40fc",  # threefold repetition detection
     "ab3fdc8",  # passed / doubled pawns
+    "6c4e7ee",  # piece mobility
 ]
 
 MASTER_OPTIONS = {
@@ -116,7 +117,7 @@ def build_fastchess_command(commit_names, add_master=False, duel=False):
 
     # Add common parameters
     cmd.extend([
-        "-each", "tc=5",
+        "-each", "tc=5+0.1",
         "-rounds", "100",
         "-concurrency", "32",
         "-config", "outname=scripts/tournament_results.json"
