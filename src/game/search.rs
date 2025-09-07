@@ -117,6 +117,43 @@ impl SearchStats {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct PositionHistory {
+    positions: Vec<u64>,
+}
+
+impl PositionHistory {
+    pub fn new() -> Self {
+        Self {
+            positions: Vec::with_capacity(256),
+        }
+    }
+
+    pub fn push(&mut self, zobrist_key: u64) {
+        self.positions.push(zobrist_key);
+    }
+
+    pub fn pop(&mut self) {
+        self.positions.pop();
+    }
+
+    pub fn is_threefold_repetition(&self, zobrist_key: u64) -> bool {
+        let mut count = 0;
+        // Only check positions with the same side to move (every other position)
+        // Start from the end and work backwards for efficiency
+        for i in (0..self.positions.len()).rev().step_by(2) {
+            if self.positions[i] == zobrist_key {
+                count += 1;
+                if count >= 2 {
+                    // Current position + 2 previous = threefold
+                    return true;
+                }
+            }
+        }
+        false
+    }
+}
+
 /// Formats and prints UCI info string
 pub fn print_uci_info(depth: usize, score: f32, pv: &[BoardMove], stats: &SearchStats) {
     let mut info = format!("info depth {}", depth);
@@ -159,6 +196,7 @@ pub fn iterative_deepening(
     limits: SearchLimits,
     stop_flag: Arc<AtomicBool>,
     tt: &mut TranspositionTable,
+    position_history: &mut PositionHistory,
 ) -> SearchResult {
     let stats = Arc::new(SearchStats::new());
     let mut best_result = SearchResult::leaf(0.0);
@@ -181,6 +219,7 @@ pub fn iterative_deepening(
             &stats,
             &limits,
             tt,
+            position_history,
         );
 
         if !stats.should_stop(&limits, &stop_flag) {
@@ -206,14 +245,20 @@ fn alpha_beta(
     stats: &Arc<SearchStats>,
     limits: &SearchLimits,
     tt: &mut TranspositionTable,
+    position_history: &mut PositionHistory,
 ) -> SearchResult {
     stats.increment_nodes();
     if stats.should_stop(&limits, &stop_flag) {
         return SearchResult::leaf(game.evaluate() * game.side);
     }
 
-    let original_alpha = alpha;
+    // Threefold repetition checks
     let zobrist_key = game.get_zobrist_key();
+    if ply > 1 && position_history.is_threefold_repetition(zobrist_key) {
+        return SearchResult::leaf(0.0); // Draw by repetition
+    }
+
+    let original_alpha = alpha;
 
     // Probe transposition table
     let mut tt_move = None;
@@ -250,7 +295,16 @@ fn alpha_beta(
 
     // Enter quiescence search to remove the horizon effect
     if depth == 0 {
-        return quiescence_search(game, ply, alpha, beta, stop_flag, stats, limits);
+        return quiescence_search(
+            game,
+            ply,
+            alpha,
+            beta,
+            stop_flag,
+            stats,
+            limits,
+            position_history,
+        );
     }
 
     let (move_count, mut moves) = game.get_moves();
@@ -284,6 +338,10 @@ fn alpha_beta(
     for board_move in moves[0..move_count].iter() {
         game.make_move(*board_move);
 
+        // Add position to history for repetition detection
+        let new_zobrist = game.get_zobrist_key();
+        position_history.push(new_zobrist);
+
         // Pass the PV for the next ply
         let next_pv = if !previous_pv.is_empty() && *board_move == previous_pv[0] {
             &previous_pv[1..]
@@ -302,7 +360,11 @@ fn alpha_beta(
             stats,
             limits,
             tt,
+            position_history,
         );
+
+        // Remove position from history after unmaking the move
+        position_history.pop();
         game.unmake_move();
 
         let value = -result.evaluation;
@@ -341,11 +403,18 @@ fn quiescence_search(
     stop_flag: &Arc<AtomicBool>,
     stats: &Arc<SearchStats>,
     limits: &SearchLimits,
+    position_history: &mut PositionHistory,
 ) -> SearchResult {
     stats.increment_nodes();
 
     if stats.should_stop(&limits, &stop_flag) {
         return SearchResult::leaf(game.evaluate() * game.side);
+    }
+
+    // Check for repetition in quiescence search
+    let zobrist_key = game.get_zobrist_key();
+    if position_history.is_threefold_repetition(zobrist_key) {
+        return SearchResult::leaf(0.0); // Draw by repetition
     }
 
     // Limit quiescence search depth to prevent explosion
@@ -405,8 +474,23 @@ fn quiescence_search(
     for board_move in capture_moves.iter() {
         game.make_move(*board_move);
 
-        let result = quiescence_search(game, ply + 1, -beta, -alpha, stop_flag, stats, limits);
+        // Add position to history
+        let new_zobrist = game.get_zobrist_key();
+        position_history.push(new_zobrist);
 
+        let result = quiescence_search(
+            game,
+            ply + 1,
+            -beta,
+            -alpha,
+            stop_flag,
+            stats,
+            limits,
+            position_history,
+        );
+
+        // Remove position from history
+        position_history.pop();
         game.unmake_move();
 
         let value = -result.evaluation;
