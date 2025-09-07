@@ -2,6 +2,8 @@
 
 A moderately fast UCI chess engine written in Rust that **kops the Prokop**.
 
+**Challenge it on [Lichess](https://lichess.org/@/prokopakop)!**
+
 ## Technical Features
 
 ### Move Generation
