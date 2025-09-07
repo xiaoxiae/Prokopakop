@@ -10,8 +10,6 @@ import seaborn as sns
 
 from pathlib import Path
 
-# List of commit names - modify this list as needed
-# Lower values should correspond to newer commits
 COMMIT_NAMES = [
     # these three were essentially random due to critical bugs in search/eval
     # "9fec3a0",
@@ -23,8 +21,12 @@ COMMIT_NAMES = [
     "bbef3be",  # quiescence search
     "35f6fb6",  # transposition table
     "ff14c29",  # faster eval
-    "178499a",  # threefold repetition detection
+    "7ff40fc",  # threefold repetition detection
+    "ab3fdc8",  # passed / doubled pawns
 ]
+
+MASTER_OPTIONS = {
+}
 
 
 def find_binary(version_name):
@@ -51,6 +53,22 @@ def find_master_binary():
     return None
 
 
+def get_commit_info(commit_item):
+    """Extract commit name and options from commit item (supports both string and dict formats)."""
+    if isinstance(commit_item, str):
+        return commit_item, {}
+    elif isinstance(commit_item, dict):
+        return commit_item["commit"], commit_item.get("options", {})
+    else:
+        raise ValueError(f"Invalid commit format: {commit_item}")
+
+
+def add_uci_options(cmd, options):
+    """Add UCI options to the command list."""
+    for option_name, option_value in options.items():
+        cmd.extend([f"option.{option_name}={option_value}"])
+
+
 def build_fastchess_command(commit_names, add_master=False, duel=False):
     """
     Build the fastchess command with multiple engines based on commit names.
@@ -70,11 +88,15 @@ def build_fastchess_command(commit_names, add_master=False, duel=False):
             f"cmd={master_binary}",
             "name=master"
         ])
+        # Add UCI options for master
+        add_uci_options(cmd, MASTER_OPTIONS)
 
     # Add engine parameters for each commit
-    for i, commit_name in enumerate(commit_names):
-        if duel and (i < len(commit_names) - (0 if not add_master else 1)):
+    for i, commit_item in enumerate(commit_names):
+        if duel and (i < len(commit_names) - (2 if not add_master else 1)):
             continue
+
+        commit_name, commit_options = get_commit_info(commit_item)
 
         binary_path = find_binary(commit_name)
         if binary_path is None:
@@ -89,11 +111,13 @@ def build_fastchess_command(commit_names, add_master=False, duel=False):
             f"cmd={binary_path}",
             f"name={engine_name}-{i}"
         ])
+        # Add UCI options for this commit
+        add_uci_options(cmd, commit_options)
 
     # Add common parameters
     cmd.extend([
         "-each", "tc=5",
-        "-rounds", "300",
+        "-rounds", "100",
         "-concurrency", "32",
         "-config", "outname=scripts/tournament_results.json"
     ])
@@ -212,6 +236,30 @@ def generate_heatmap(results_file="scripts/tournament_results.json", add_master=
     print(f"\nHeatmap saved to {output_file}")
 
 
+def print_engine_info(commit_names, add_master=False):
+    """Print information about engines and their options."""
+    total_engines = len(commit_names)
+    if add_master:
+        total_engines += 1
+
+    print(f"Engines configured:")
+
+    if add_master:
+        options_str = ""
+        if MASTER_OPTIONS:
+            options_list = [f"{k}={v}" for k, v in MASTER_OPTIONS.items()]
+            options_str = f" (options: {', '.join(options_list)})"
+        print(f"  master (target/release/prokopakop){options_str}")
+
+    for i, commit_item in enumerate(commit_names):
+        commit_name, commit_options = get_commit_info(commit_item)
+        options_str = ""
+        if commit_options:
+            options_list = [f"{k}={v}" for k, v in commit_options.items()]
+            options_str = f" (options: {', '.join(options_list)})"
+        print(f"  {i}. {commit_name} (target/release/prokopakop-{commit_name}){options_str}")
+
+
 def main():
     """
     Main function to run the fastchess tournament.
@@ -236,18 +284,9 @@ def main():
         generate_heatmap(args.results_file, args.add_master)
     else:
         # Run the tournament
-        total_engines = len(commits_to_use)
-        if args.add_master:
-            total_engines += 1
-
         tournament_type = "duel" if args.duel else "tournament"
-        print(f"Setting up fastchess {tournament_type} with {total_engines} engines:")
-
-        if args.add_master:
-            print("  master (target/release/prokopakop)")
-
-        for i, commit in enumerate(commits_to_use):
-            print(f"  {i}. {commit} (target/release/prokopakop-{commit})")
+        print(f"Setting up fastchess {tournament_type}:")
+        print_engine_info(commits_to_use, args.add_master)
         print()
 
         # Run fastchess

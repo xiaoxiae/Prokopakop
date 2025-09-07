@@ -17,13 +17,20 @@ A moderately fast UCI chess engine written in Rust that **kops the Prokop**.
     <figcaption><em>Performance benchmarks across git commits on a i9-14900K. Benchmarks use perft 5, hashing and bulk-counting.</em></figcaption>
 </figure>
 
-### Search + Evaluation
+### Search
 
-- **[Alpha-Beta](https://www.chessprogramming.org/Alpha-Beta) Search** via **[Negamax](https://www.chessprogramming.org/Negamax)** - Negamax search with alpha-beta pruning
-- **[Iterative Deepening](https://www.chessprogramming.org/Iterative_Deepening)** - Progressive search depth
-- **[Move Ordering](https://www.chessprogramming.org/Move_Ordering)** - Principal Variation (PV) moves first, then Most Valuable Victim - Least Valuable Attacker (MVV-LVA)
-- **[Quiescence Search](https://www.chessprogramming.org/Quiescence_Search)** - to avoid horizon effect
-- **[Transposition Table](https://www.chessprogramming.org/Transposition_Table)** - Position caching to avoid re-searching identical positions
+- **[Alpha-Beta](https://www.chessprogramming.org/Alpha-Beta)** via **[Negamax](https://www.chessprogramming.org/Negamax)**
+- **[Iterative Deepening](https://www.chessprogramming.org/Iterative_Deepening)**
+- **[Move Ordering](https://www.chessprogramming.org/Move_Ordering)** - principal variation moves first, then [MVV-LVA](https://www.chessprogramming.org/MVV-LVA)
+- **[Quiescence Search](https://www.chessprogramming.org/Quiescence_Search)**
+- **[Transposition Table](https://www.chessprogramming.org/Transposition_Table)**
+
+### Evaluation
+
+- [Material](https://www.chessprogramming.org/Material)
+- [Piece-Square tables](https://www.chessprogramming.org/Piece-Square_Tables)
+- [Pawn Structure](https://www.chessprogramming.org/Pawn_Structure) (doubled pawns, passed pawns)
+
 
 <figure>
     <img src="scripts/tournament.png" alt="Tournament Results Heatmap" width="100%">
