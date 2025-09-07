@@ -2,7 +2,8 @@ use strum::EnumCount;
 
 use crate::game::board::Game;
 use crate::game::pieces::{Color, Piece};
-use crate::utils::bitboard::BitboardExt;
+use crate::utils::bitboard::{Bitboard, BitboardExt};
+use crate::utils::square::BoardSquareExt;
 
 // Do not increase this! We're using it to count moves to checkmate
 // by incrementing via PLY and subtract later. Incrementing this too much
@@ -23,6 +24,20 @@ pub const ROOK_POSITION_MULTIPLIER: f32 = 30.0;
 pub const QUEEN_POSITION_MULTIPLIER: f32 = 20.0;
 pub const KING_EARLY_POSITION_MULTIPLIER: f32 = 40.0;
 pub const KING_LATE_POSITION_MULTIPLIER: f32 = 50.0;
+
+// Pawn structure bonuses/penalties
+pub const PASSED_PAWN_BONUS: [f32; 8] = [
+    0.0,   // Rank 1 (no pawn should be here)
+    5.0,   // Rank 2
+    10.0,  // Rank 3
+    20.0,  // Rank 4
+    35.0,  // Rank 5
+    60.0,  // Rank 6
+    100.0, // Rank 7
+    0.0,   // Rank 8 (promoted)
+];
+
+pub const DOUBLED_PAWN_PENALTY: f32 = -10.0;
 
 pub fn get_piece_value(piece: Piece) -> f32 {
     match piece {
@@ -190,14 +205,96 @@ pub fn evaluate_material(game: &Game) -> (f32, f32) {
     (white, black)
 }
 
+fn is_passed_pawn(pawn_square: u8, color: Color, enemy_pawns: Bitboard) -> bool {
+    let file = pawn_square.get_x();
+    let rank = pawn_square.get_y();
+
+    let mut passed_mask: Bitboard = 0;
+
+    // Check same file and adjacent files
+    for check_file in (file.saturating_sub(1))..=(file.min(6) + 1) {
+        if check_file > 7 {
+            continue;
+        }
+
+        // For white pawns, check ranks above; for black pawns, check ranks below
+        match color {
+            Color::White => {
+                for check_rank in (rank + 1)..8 {
+                    let square = check_rank * 8 + check_file;
+                    passed_mask |= 1u64 << square;
+                }
+            }
+            Color::Black => {
+                if rank > 0 {
+                    for check_rank in 0..rank {
+                        let square = check_rank * 8 + check_file;
+                        passed_mask |= 1u64 << square;
+                    }
+                }
+            }
+        }
+    }
+
+    // If no enemy pawns in the mask, the pawn is passed
+    (passed_mask & enemy_pawns) == 0
+}
+
+// Count doubled pawns (pawns on the same file)
+fn count_doubled_pawns(pawns: Bitboard) -> u32 {
+    let mut doubled = 0;
+
+    for file in 0..8 {
+        let file_mask = 0x0101010101010101u64 << file;
+        let pawns_on_file = (pawns & file_mask).count_ones();
+        if pawns_on_file > 1 {
+            doubled += pawns_on_file - 1; // Count extra pawns as doubled
+        }
+    }
+
+    doubled
+}
+
+pub fn evaluate_pawn_structure(game: &Game, game_phase: f32) -> f32 {
+    let mut eval = 0.0;
+
+    let white_pawns =
+        game.piece_bitboards[Piece::Pawn as usize] & game.color_bitboards[Color::White as usize];
+    let black_pawns =
+        game.piece_bitboards[Piece::Pawn as usize] & game.color_bitboards[Color::Black as usize];
+
+    for square in white_pawns.iter_positions() {
+        if is_passed_pawn(square, Color::White, black_pawns) {
+            let rank = (square / 8) as usize;
+            let bonus = PASSED_PAWN_BONUS[rank] * (1.0 + game_phase * 0.5);
+            eval += bonus;
+        }
+    }
+
+    for square in black_pawns.iter_positions() {
+        if is_passed_pawn(square, Color::Black, white_pawns) {
+            let rank = 7 - (square / 8) as usize;
+            let bonus = PASSED_PAWN_BONUS[rank] * (1.0 + game_phase * 0.5);
+            eval -= bonus;
+        }
+    }
+
+    // Evaluate doubled pawns
+    let white_doubled = count_doubled_pawns(white_pawns);
+    let black_doubled = count_doubled_pawns(black_pawns);
+
+    eval += white_doubled as f32 * DOUBLED_PAWN_PENALTY;
+    eval -= black_doubled as f32 * DOUBLED_PAWN_PENALTY;
+
+    eval
+}
+
 pub fn evaluate_positional(game: &Game, game_phase: f32) -> f32 {
     let mut positional = 0.0;
 
-    // Use bitboard operations instead of for-loop
     for piece in 0..Piece::COUNT {
         let piece_type = Piece::from_repr(piece).unwrap();
 
-        // Evaluate white pieces of this type
         let white_pieces =
             game.piece_bitboards[piece] & game.color_bitboards[Color::White as usize];
         for square in white_pieces.iter_positions() {
@@ -206,7 +303,6 @@ pub fn evaluate_positional(game: &Game, game_phase: f32) -> f32 {
             positional += position_value;
         }
 
-        // Evaluate black pieces of this type
         let black_pieces =
             game.piece_bitboards[piece] & game.color_bitboards[Color::Black as usize];
         for square in black_pieces.iter_positions() {
@@ -215,6 +311,9 @@ pub fn evaluate_positional(game: &Game, game_phase: f32) -> f32 {
             positional -= position_value; // Subtract for black pieces
         }
     }
+
+    // Pawn structure evaluation
+    positional += evaluate_pawn_structure(game, game_phase);
 
     positional
 }
