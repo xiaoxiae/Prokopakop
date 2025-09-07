@@ -23,6 +23,7 @@ COMMIT_NAMES = [
     "bbef3be",  # quiescence search
     "35f6fb6",  # transposition table
     "ff14c29",  # faster eval
+    "178499a",  # threefold repetition detection
 ]
 
 

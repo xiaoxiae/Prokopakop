@@ -16,6 +16,7 @@ pub struct GameController {
     pub hash_table_size: usize,
     pub move_overhead: u64,
     pub threads: u64,
+    position_history: PositionHistory,
     initialized: bool,
     search_thread: Option<JoinHandle<()>>,
     stop_flag: Arc<AtomicBool>,
@@ -197,6 +198,7 @@ impl GameController {
             hash_table_size: 16,
             move_overhead: 10,
             threads: 1,
+            position_history: PositionHistory::new(),
             initialized: false,
             search_thread: None,
             stop_flag: Arc::new(AtomicBool::new(false)),
@@ -205,10 +207,14 @@ impl GameController {
 
     pub fn new_game(&mut self) {
         self.game = Game::new(None);
+        self.position_history = PositionHistory::new();
+        self.position_history.push(self.game.zobrist_key);
     }
 
     pub fn new_game_from_fen(&mut self, fen: &str) {
         self.game = Game::new(Some(fen));
+        self.position_history = PositionHistory::new();
+        self.position_history.push(self.game.zobrist_key);
     }
 
     pub fn initialize(&mut self) {
@@ -298,6 +304,8 @@ impl GameController {
                 // Check if the move is in the valid moves array
                 if valid_moves[0..move_count].contains(&board_move) {
                     self.game.make_move(board_move);
+                    self.position_history.push(self.game.zobrist_key);
+
                     MoveResultType::Success
                 } else {
                     MoveResultType::InvalidMove
@@ -403,6 +411,7 @@ impl GameController {
         let search_params = SearchParams::parse(params);
 
         let mut game_clone = self.game.clone();
+        let mut position_history_clone = self.position_history.clone();
         let stop_flag = Arc::clone(&self.stop_flag);
 
         let move_overhead = self.move_overhead;
@@ -423,7 +432,7 @@ impl GameController {
                 limits,
                 stop_flag,
                 &mut tt,
-                &mut PositionHistory::new(),
+                &mut position_history_clone,
             );
 
             // Output the best move in UCI format

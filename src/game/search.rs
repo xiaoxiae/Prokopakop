@@ -5,6 +5,8 @@ use std::sync::{
 };
 use std::time::Instant;
 
+use fxhash::FxHashMap;
+
 use crate::game::board::{BoardMove, BoardMoveExt, Game};
 use crate::game::evaluate::{CHECKMATE_SCORE, get_piece_value};
 use crate::game::pieces::Piece;
@@ -119,38 +121,38 @@ impl SearchStats {
 
 #[derive(Clone, Debug)]
 pub struct PositionHistory {
-    positions: Vec<u64>,
+    positions: FxHashMap<u64, u32>,
+    history: Vec<u64>, // Keep track of order for undo
 }
 
 impl PositionHistory {
     pub fn new() -> Self {
         Self {
-            positions: Vec::with_capacity(256),
+            positions: FxHashMap::default(),
+            history: Vec::with_capacity(256),
         }
     }
 
     pub fn push(&mut self, zobrist_key: u64) {
-        self.positions.push(zobrist_key);
+        self.history.push(zobrist_key);
+        *self.positions.entry(zobrist_key).or_insert(0) += 1;
     }
 
     pub fn pop(&mut self) {
-        self.positions.pop();
-    }
-
-    pub fn is_threefold_repetition(&self, zobrist_key: u64) -> bool {
-        let mut count = 0;
-        // Only check positions with the same side to move (every other position)
-        // Start from the end and work backwards for efficiency
-        for i in (0..self.positions.len()).rev().step_by(2) {
-            if self.positions[i] == zobrist_key {
-                count += 1;
-                if count >= 2 {
-                    // Current position + 2 previous = threefold
-                    return true;
+        if let Some(zobrist_key) = self.history.pop() {
+            if let Some(count) = self.positions.get_mut(&zobrist_key) {
+                if *count > 1 {
+                    *count -= 1;
+                } else {
+                    self.positions.remove(&zobrist_key);
                 }
             }
         }
-        false
+    }
+
+    pub fn is_threefold_repetition(&self, zobrist_key: u64) -> bool {
+        // Check if this position (including current) appears 3 or more times
+        self.positions.get(&zobrist_key).copied().unwrap_or(0) >= 2
     }
 }
 
@@ -254,8 +256,10 @@ fn alpha_beta(
 
     // Threefold repetition checks
     let zobrist_key = game.get_zobrist_key();
-    if ply > 1 && position_history.is_threefold_repetition(zobrist_key) {
-        return SearchResult::leaf(0.0); // Draw by repetition
+    if ply > 1 && ply <= 4 {
+        if position_history.is_threefold_repetition(zobrist_key) {
+            return SearchResult::leaf(0.0); // Draw by repetition
+        }
     }
 
     let original_alpha = alpha;
@@ -295,16 +299,7 @@ fn alpha_beta(
 
     // Enter quiescence search to remove the horizon effect
     if depth == 0 {
-        return quiescence_search(
-            game,
-            ply,
-            alpha,
-            beta,
-            stop_flag,
-            stats,
-            limits,
-            position_history,
-        );
+        return quiescence_search(game, ply, alpha, beta, stop_flag, stats, limits);
     }
 
     let (move_count, mut moves) = game.get_moves();
@@ -403,18 +398,11 @@ fn quiescence_search(
     stop_flag: &Arc<AtomicBool>,
     stats: &Arc<SearchStats>,
     limits: &SearchLimits,
-    position_history: &mut PositionHistory,
 ) -> SearchResult {
     stats.increment_nodes();
 
     if stats.should_stop(&limits, &stop_flag) {
         return SearchResult::leaf(game.evaluate() * game.side);
-    }
-
-    // Check for repetition in quiescence search
-    let zobrist_key = game.get_zobrist_key();
-    if position_history.is_threefold_repetition(zobrist_key) {
-        return SearchResult::leaf(0.0); // Draw by repetition
     }
 
     // Limit quiescence search depth to prevent explosion
@@ -474,23 +462,9 @@ fn quiescence_search(
     for board_move in capture_moves.iter() {
         game.make_move(*board_move);
 
-        // Add position to history
-        let new_zobrist = game.get_zobrist_key();
-        position_history.push(new_zobrist);
-
-        let result = quiescence_search(
-            game,
-            ply + 1,
-            -beta,
-            -alpha,
-            stop_flag,
-            stats,
-            limits,
-            position_history,
-        );
+        let result = quiescence_search(game, ply + 1, -beta, -alpha, stop_flag, stats, limits);
 
         // Remove position from history
-        position_history.pop();
         game.unmake_move();
 
         let value = -result.evaluation;
