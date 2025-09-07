@@ -1,5 +1,7 @@
 use super::pieces::{Color, Piece};
-use crate::game::evaluate::{calculate_game_phase, evaluate_material, evaluate_positional};
+use crate::game::evaluate::{
+    calculate_game_phase, evaluate_material, evaluate_mobility, evaluate_positional,
+};
 use crate::game::pieces::ColoredPiece;
 use crate::utils::bitboard::{
     BLACK_PROMOTION_ROW, Bitboard, BitboardExt, MAGIC_BLOCKER_BITBOARD, PIECE_MOVE_BITBOARDS,
@@ -1424,7 +1426,11 @@ impl Game {
     }
 
     pub(crate) fn get_moves(&self) -> (usize, [BoardMove; 256]) {
-        match self.side {
+        self.get_side_moves(self.side)
+    }
+
+    pub(crate) fn get_side_moves(&self, side: Color) -> (usize, [BoardMove; 256]) {
+        match side {
             Color::White => self.get_moves_const::<ConstWhite>(),
             Color::Black => self.get_moves_const::<ConstBlack>(),
         }
@@ -1468,9 +1474,12 @@ impl Game {
         let (white_material, black_material) = evaluate_material(self);
 
         let game_phase = calculate_game_phase(white_material + black_material);
-        let positional_value = evaluate_positional(self, game_phase);
 
-        white_material - black_material + positional_value
+        let material_value = white_material - black_material;
+        let positional_value = evaluate_positional(self, game_phase);
+        let mobility_value = evaluate_mobility(self, game_phase);
+
+        material_value + positional_value + mobility_value
     }
 
     /// Play through a sequence of moves and record the zobrist hash after each move

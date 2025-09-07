@@ -1,6 +1,6 @@
 use strum::EnumCount;
 
-use crate::game::board::Game;
+use crate::game::board::{BoardMove, BoardMoveExt, Game};
 use crate::game::pieces::{Color, Piece};
 use crate::utils::bitboard::{Bitboard, BitboardExt};
 use crate::utils::square::BoardSquareExt;
@@ -38,6 +38,13 @@ pub const PASSED_PAWN_BONUS: [f32; 8] = [
 ];
 
 pub const DOUBLED_PAWN_PENALTY: f32 = -10.0;
+
+pub const MOBILITY_MULTIPLIER: f32 = 2.0;
+pub const PAWN_MOBILITY_WEIGHT: f32 = 0.5;
+pub const KNIGHT_MOBILITY_WEIGHT: f32 = 4.0;
+pub const BISHOP_MOBILITY_WEIGHT: f32 = 3.0;
+pub const ROOK_MOBILITY_WEIGHT: f32 = 2.0;
+pub const QUEEN_MOBILITY_WEIGHT: f32 = 1.0;
 
 pub fn get_piece_value(piece: Piece) -> f32 {
     match piece {
@@ -316,4 +323,37 @@ pub fn evaluate_positional(game: &Game, game_phase: f32) -> f32 {
     positional += evaluate_pawn_structure(game, game_phase);
 
     positional
+}
+
+pub fn evaluate_mobility(game: &Game, game_phase: f32) -> f32 {
+    let mobility_score;
+
+    let (white_move_count, white_moves) = game.get_side_moves(Color::White);
+    let (black_move_count, black_moves) = game.get_side_moves(Color::Black);
+
+    let white_weighted = calculate_weighted_mobility(&game, &white_moves[..white_move_count]);
+    let black_weighted = calculate_weighted_mobility(&game, &black_moves[..black_move_count]);
+
+    mobility_score = (white_weighted - black_weighted) * (1.0 + game_phase * 0.5);
+
+    mobility_score
+}
+
+fn calculate_weighted_mobility(game: &Game, moves: &[BoardMove]) -> f32 {
+    let mut weighted_mobility = 0.0;
+
+    for mv in moves {
+        let piece = game.pieces[mv.get_from() as usize].unwrap().0;
+
+        weighted_mobility += match piece {
+            Piece::Pawn => PAWN_MOBILITY_WEIGHT,
+            Piece::Knight => KNIGHT_MOBILITY_WEIGHT,
+            Piece::Bishop => BISHOP_MOBILITY_WEIGHT,
+            Piece::Rook => ROOK_MOBILITY_WEIGHT,
+            Piece::Queen => QUEEN_MOBILITY_WEIGHT,
+            Piece::King => 0.0,
+        };
+    }
+
+    weighted_mobility
 }
