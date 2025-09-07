@@ -1,4 +1,5 @@
 use crate::game::board::{BoardMove, BoardMoveExt, Game};
+use crate::game::opening_book::OpeningBook;
 use crate::game::pieces::Color;
 use crate::game::search::{PositionHistory, SearchLimits, iterative_deepening};
 use crate::game::table::TranspositionTable;
@@ -16,6 +17,7 @@ pub struct GameController {
     pub hash_table_size: usize,
     pub move_overhead: u64,
     pub threads: u64,
+    pub opening_book: Option<OpeningBook>,
     position_history: PositionHistory,
     initialized: bool,
     search_thread: Option<JoinHandle<()>>,
@@ -198,10 +200,28 @@ impl GameController {
             hash_table_size: 16,
             move_overhead: 10,
             threads: 1,
+            opening_book: None,
             position_history: PositionHistory::new(),
             initialized: false,
             search_thread: None,
             stop_flag: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    pub fn load_opening_book(&mut self, path: &str) -> Result<(), std::io::Error> {
+        match OpeningBook::load_from_file(path) {
+            Ok(book) => {
+                println!(
+                    "info string Opening book loaded: {} positions",
+                    book.position_count()
+                );
+                self.opening_book = Some(book);
+                Ok(())
+            }
+            Err(e) => {
+                eprintln!("info string Failed to load opening book: {}", e);
+                Err(e)
+            }
         }
     }
 
@@ -290,6 +310,16 @@ impl GameController {
                     );
                 }
             },
+            "ownbook" => {
+                if value.trim().is_empty() || value == "<empty>" {
+                    self.opening_book = None;
+                    println!("info string Opening book disabled");
+                } else {
+                    if let Err(_) = self.load_opening_book(value) {
+                        eprintln!("info string Failed to load opening book from: {}", value);
+                    }
+                }
+            }
             _ => {
                 eprintln!("Unknown option: {}", name);
             }
@@ -413,6 +443,7 @@ impl GameController {
         let mut game_clone = self.game.clone();
         let mut position_history_clone = self.position_history.clone();
         let stop_flag = Arc::clone(&self.stop_flag);
+        let opening_book = self.opening_book.clone();
 
         let move_overhead = self.move_overhead;
         let hash_table_size = self.hash_table_size;
@@ -433,6 +464,7 @@ impl GameController {
                 stop_flag,
                 &mut tt,
                 &mut position_history_clone,
+                opening_book.as_ref(),
             );
 
             // Output the best move in UCI format
@@ -458,5 +490,6 @@ impl GameController {
         println!("option name Move Overhead type spin default 10 min 0 max 5000");
         println!("option name Threads type spin default 1 min 1 max 1024");
         println!("option name PerftHash type check default true");
+        println!("option name OwnBook type string default <empty>");
     }
 }

@@ -9,6 +9,7 @@ use fxhash::FxHashMap;
 
 use crate::game::board::{BoardMove, BoardMoveExt, Game};
 use crate::game::evaluate::{CHECKMATE_SCORE, get_piece_value};
+use crate::game::opening_book::OpeningBook;
 use crate::game::pieces::Piece;
 use crate::game::table::{GameTranspositionExt, NodeType, TranspositionTable};
 
@@ -199,10 +200,28 @@ pub fn iterative_deepening(
     stop_flag: Arc<AtomicBool>,
     tt: &mut TranspositionTable,
     position_history: &mut PositionHistory,
+    opening_book: Option<&OpeningBook>,
 ) -> SearchResult {
     let stats = Arc::new(SearchStats::new());
     let mut best_result = SearchResult::leaf(0.0);
     let mut previous_pv: Vec<BoardMove> = Vec::new();
+
+    // Check opening book first
+    if let Some(book) = opening_book {
+        if let Some(best_move) = book.get_best_move(game.zobrist_key) {
+            println!("info string Using opening book move");
+
+            // Use a neutral evaluation since opening book moves don't have evaluations
+            let pv = vec![best_move];
+            print_uci_info(1, 0.0, &pv, &stats);
+
+            return SearchResult {
+                best_move,
+                evaluation: 0.0,
+                pv,
+            };
+        }
+    }
 
     // Start new search generation
     tt.new_search();

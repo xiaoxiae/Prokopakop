@@ -54,10 +54,40 @@ stop                             # Stop current search
 quit                             # Exit engine
 ```
 
+### Opening Book
+
+Prokopakop supports opening books built from PGN game collections:
+
+#### Building an Opening Book
+```bash
+# Build opening book from PGN files
+prokopakop --build-book games.pgn -o opening.book
+
+# With custom settings
+prokopakop --build-book *.pgn -o opening.book --min-count 5 --max-positions 50000
+```
+
+**Options:**
+- `--min-count N`: Only keep positions that appear at least N times (default: 3)
+- `--max-positions N`: Keep at most N positions (default: 100,000)
+
+#### Using an Opening Book
+Set the `OwnBook` UCI option to the path of your opening book file:
+
+```
+setoption name OwnBook value path/to/opening.book
+```
+
+The engine will automatically use opening book moves when available, displaying:
+```
+info string Using opening book move
+```
+
 ### Command Line Options
 ```bash
 prokopakop                    # Start in UCI mode
 prokopakop --magic            # Bootstrap magic bitboards
+prokopakop --build-book <pgn> -o <book>  # Build opening book
 ```
 
 ## Resources

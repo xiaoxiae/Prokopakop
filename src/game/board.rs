@@ -1472,4 +1472,20 @@ impl Game {
 
         white_material - black_material + positional_value
     }
+
+    /// Play through a sequence of moves and record the zobrist hash after each move
+    pub fn record_position_sequence(&mut self, moves: &[BoardMove]) -> Vec<(u64, BoardMove)> {
+        let mut positions = Vec::new();
+
+        for &board_move in moves {
+            // Record the position before making the move
+            let zobrist_key = self.zobrist_key;
+            positions.push((zobrist_key, board_move));
+
+            // Make the move
+            self.make_move(board_move);
+        }
+
+        positions
+    }
 }
