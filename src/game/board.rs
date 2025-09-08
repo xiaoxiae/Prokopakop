@@ -638,6 +638,25 @@ impl Game {
         dispatch_piece_color!(piece, color, make_move_const, self, board_move);
     }
 
+    pub(crate) fn make_null_move(&mut self) {
+        self.history.push((
+            BoardMove::empty(),
+            None,
+            self.castling_flags,
+            self.en_passant_bitmap,
+        ));
+
+        self.update_en_passant_bitmap(0);
+        self.update_turn(0);
+    }
+
+    pub(crate) fn unmake_null_move(&mut self) {
+        let (_, _, _, en_passant_bitmap) = self.history.pop().unwrap();
+
+        self.update_en_passant_bitmap(en_passant_bitmap);
+        self.update_turn(0);
+    }
+
     fn make_move_const<P: ConstPiece, C: ConstColor>(&mut self, board_move: BoardMove) {
         let captured_piece = self.pieces[board_move.get_to() as usize];
 

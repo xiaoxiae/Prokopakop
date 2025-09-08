@@ -388,6 +388,34 @@ fn alpha_beta(
         return quiescence_search(game, ply, alpha, beta, stop_flag, stats, limits);
     }
 
+    // Null move pruning
+    if depth >= 3 && !game.is_king_in_check(game.side) && beta.abs() < CHECKMATE_SCORE - 1000.0 {
+        game.make_null_move();
+
+        // Search with reduced depth (R=2 or R=3 typically)
+        let r = 2 + (depth >= 6) as usize;
+        let null_result = alpha_beta(
+            game,
+            depth.saturating_sub(1 + r),
+            ply + 1,
+            -beta,
+            -beta + 1.0, // Null window
+            &[],
+            stop_flag,
+            stats,
+            limits,
+            tt,
+            position_history,
+            killer_moves,
+        );
+
+        game.unmake_null_move();
+
+        if -null_result.evaluation >= beta {
+            return SearchResult::leaf(beta); // Fail high
+        }
+    }
+
     let (move_count, mut moves) = game.get_moves();
 
     if move_count == 0 {
