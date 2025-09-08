@@ -6,7 +6,7 @@ use crate::game::table::TranspositionTable;
 
 use fxhash::FxHashMap;
 use std::sync::{
-    Arc,
+    Arc, Mutex,
     atomic::{AtomicBool, Ordering},
 };
 use std::thread::{self, JoinHandle};
@@ -22,6 +22,7 @@ pub struct GameController {
     initialized: bool,
     search_thread: Option<JoinHandle<()>>,
     stop_flag: Arc<AtomicBool>,
+    tt: Arc<Mutex<TranspositionTable>>,
 }
 
 #[derive(Debug)]
@@ -197,7 +198,7 @@ impl GameController {
         Self {
             game: Game::new(None),
             perft_hash: true,
-            hash_table_size: 16,
+            hash_table_size: 64,
             move_overhead: 10,
             threads: 1,
             opening_book: None,
@@ -205,6 +206,7 @@ impl GameController {
             initialized: false,
             search_thread: None,
             stop_flag: Arc::new(AtomicBool::new(false)),
+            tt: Arc::new(Mutex::new(TranspositionTable::new(64))),
         }
     }
 
@@ -229,12 +231,20 @@ impl GameController {
         self.game = Game::new(None);
         self.position_history = PositionHistory::new();
         self.position_history.push(self.game.zobrist_key);
+
+        if let Ok(mut tt) = self.tt.lock() {
+            tt.clear();
+        }
     }
 
     pub fn new_game_from_fen(&mut self, fen: &str) {
         self.game = Game::new(Some(fen));
         self.position_history = PositionHistory::new();
         self.position_history.push(self.game.zobrist_key);
+
+        if let Ok(mut tt) = self.tt.lock() {
+            tt.clear();
+        }
     }
 
     pub fn initialize(&mut self) {
@@ -278,6 +288,7 @@ impl GameController {
                 Ok(val) => {
                     if val <= 33554432 {
                         self.hash_table_size = val;
+                        self.tt = Arc::new(Mutex::new(TranspositionTable::new(val)));
                     } else {
                         eprintln!(
                             "Invalid value for Hash option: {}. Expected value between 1 and 33554432",
@@ -444,9 +455,10 @@ impl GameController {
         let mut position_history_clone = self.position_history.clone();
         let stop_flag = Arc::clone(&self.stop_flag);
         let opening_book = self.opening_book.clone();
-
         let move_overhead = self.move_overhead;
-        let hash_table_size = self.hash_table_size;
+
+        // Clone the shared transposition table reference
+        let tt = Arc::clone(&self.tt);
 
         let handle = thread::spawn(move || {
             let limits = SearchLimits {
@@ -457,15 +469,29 @@ impl GameController {
                 infinite: search_params.infinite,
             };
 
-            let mut tt = TranspositionTable::new(hash_table_size);
-            let result = iterative_deepening(
-                &mut game_clone,
-                limits,
-                stop_flag,
-                &mut tt,
-                &mut position_history_clone,
-                opening_book.as_ref(),
-            );
+            let result = {
+                if let Ok(mut tt_guard) = tt.lock() {
+                    iterative_deepening(
+                        &mut game_clone,
+                        limits,
+                        stop_flag,
+                        &mut *tt_guard,
+                        &mut position_history_clone,
+                        opening_book.as_ref(),
+                    )
+                } else {
+                    let mut temp_tt = TranspositionTable::new(64);
+
+                    iterative_deepening(
+                        &mut game_clone,
+                        limits,
+                        stop_flag,
+                        &mut temp_tt,
+                        &mut position_history_clone,
+                        opening_book.as_ref(),
+                    )
+                }
+            };
 
             // Output the best move in UCI format
             println!("bestmove {}", result.best_move.unparse());
@@ -486,7 +512,7 @@ impl GameController {
     }
 
     pub fn print_uci_options(&self) {
-        println!("option name Hash type spin default 16 min 1 max 33554432");
+        println!("option name Hash type spin default 64 min 1 max 33554432");
         println!("option name Move Overhead type spin default 10 min 0 max 5000");
         println!("option name Threads type spin default 1 min 1 max 1024");
         println!("option name PerftHash type check default true");
