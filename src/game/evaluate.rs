@@ -179,8 +179,7 @@ fn get_position_value(piece: Piece, square: usize, color: Color, game_phase: f32
     normalized_value * multiplier
 }
 
-// Calculate game phase (0.0 = early game, 1.0 = late game)
-// Based on remaining material on the board
+// Calculate game phase (0.0 = early game, 1.0 = late game) based on material
 pub fn calculate_game_phase(total_material: f32) -> f32 {
     let max_material =
         2.0 * QUEEN_VALUE + 4.0 * ROOK_VALUE + 4.0 * BISHOP_VALUE + 4.0 * KNIGHT_VALUE;
@@ -216,38 +215,32 @@ fn is_passed_pawn(pawn_square: u8, color: Color, enemy_pawns: Bitboard) -> bool 
     let file = pawn_square.get_x();
     let rank = pawn_square.get_y();
 
-    let mut passed_mask: Bitboard = 0;
+    const FILE_A: u64 = 0x0101010101010101;
+    const FILE_H: u64 = 0x8080808080808080;
 
-    // Check same file and adjacent files
-    for check_file in (file.saturating_sub(1))..=(file.min(6) + 1) {
-        if check_file > 7 {
-            continue;
-        }
+    let center_file = FILE_A << file;
 
-        // For white pawns, check ranks above; for black pawns, check ranks below
-        match color {
-            Color::White => {
-                for check_rank in (rank + 1)..8 {
-                    let square = check_rank * 8 + check_file;
-                    passed_mask |= 1u64 << square;
-                }
-            }
-            Color::Black => {
-                if rank > 0 {
-                    for check_rank in 0..rank {
-                        let square = check_rank * 8 + check_file;
-                        passed_mask |= 1u64 << square;
-                    }
-                }
+    let left_file = (center_file >> 1) & !FILE_H;
+    let right_file = (center_file << 1) & !FILE_A;
+
+    let files_mask = center_file | left_file | right_file;
+
+    let rank_mask = match color {
+        Color::White => 0xFFFFFFFFFFFFFFFFu64 << ((rank + 1) * 8),
+        Color::Black => {
+            if rank > 0 {
+                (1u64 << (rank * 8)) - 1
+            } else {
+                0
             }
         }
-    }
+    };
 
-    // If no enemy pawns in the mask, the pawn is passed
+    let passed_mask = files_mask & rank_mask;
+
     (passed_mask & enemy_pawns) == 0
 }
 
-// Count doubled pawns (pawns on the same file)
 fn count_doubled_pawns(pawns: Bitboard) -> u32 {
     let mut doubled = 0;
 
