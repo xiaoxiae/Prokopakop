@@ -1,7 +1,8 @@
 use std::fmt::{Display, Formatter, Result};
+use std::ops::Div;
 use std::sync::{
     Arc,
-    atomic::{AtomicBool, AtomicU64, Ordering},
+    atomic::{AtomicBool, Ordering},
 };
 use std::time::Instant;
 
@@ -11,7 +12,7 @@ use crate::game::board::{BoardMove, BoardMoveExt, Game};
 use crate::game::evaluate::{CHECKMATE_SCORE, QUEEN_VALUE, get_piece_value};
 use crate::game::opening_book::OpeningBook;
 use crate::game::pieces::Piece;
-use crate::game::table::{GameTranspositionExt, NodeType, TranspositionTable};
+use crate::game::table::{NodeType, TranspositionTable};
 
 #[derive(Debug, Clone)]
 pub struct SearchResult {
@@ -59,7 +60,6 @@ impl KillerMoves {
         }
     }
 
-    /// Add a killer move at the given ply
     pub fn add_killer(&mut self, ply: usize, board_move: BoardMove) {
         if ply >= self.killers.len() {
             return;
@@ -100,24 +100,23 @@ pub struct SearchLimits {
     pub infinite: bool,
 }
 
-/// Statistics tracked during search
 pub struct SearchStats {
-    pub nodes: AtomicU64,
+    pub nodes: u64,
     pub start_time: Instant,
-    pub current_depth: AtomicU64,
+    pub current_depth: u64,
 }
 
 impl SearchStats {
     pub fn new() -> Self {
         Self {
-            nodes: AtomicU64::new(0),
+            nodes: 0,
             start_time: Instant::now(),
-            current_depth: AtomicU64::new(0),
+            current_depth: 0,
         }
     }
 
-    pub fn increment_nodes(&self) {
-        self.nodes.fetch_add(1, Ordering::Relaxed);
+    pub fn increment_nodes(&mut self) {
+        self.nodes += 1;
     }
 
     pub fn get_elapsed_ms(&self) -> u64 {
@@ -127,7 +126,7 @@ impl SearchStats {
     pub fn get_nps(&self) -> u64 {
         let elapsed_secs = self.start_time.elapsed().as_secs_f64();
         if elapsed_secs > 0.0 {
-            (self.nodes.load(Ordering::Relaxed) as f64 / elapsed_secs) as u64
+            (self.nodes as f64 / elapsed_secs) as u64
         } else {
             0
         }
@@ -143,7 +142,7 @@ impl SearchStats {
             return false;
         }
 
-        let node_count = self.nodes.load(Ordering::Relaxed);
+        let node_count = self.nodes;
 
         // Check node limit
         if let Some(max_nodes) = limits.max_nodes {
@@ -228,7 +227,7 @@ pub fn print_uci_info(depth: usize, score: f32, pv: &[BoardMove], stats: &Search
     }
 
     // Add nodes
-    info.push_str(&format!(" nodes {}", stats.nodes.load(Ordering::Relaxed)));
+    info.push_str(&format!(" nodes {}", stats.nodes));
 
     // Add nps
     info.push_str(&format!(" nps {}", stats.get_nps()));
@@ -255,7 +254,7 @@ pub fn iterative_deepening(
     position_history: &mut PositionHistory,
     opening_book: Option<&OpeningBook>,
 ) -> SearchResult {
-    let stats = Arc::new(SearchStats::new());
+    let mut stats = SearchStats::new();
     let mut best_result = SearchResult::leaf(0.0);
     let mut previous_pv: Vec<BoardMove> = Vec::new();
 
@@ -276,6 +275,21 @@ pub fn iterative_deepening(
         }
     }
 
+    // If only one move is available, return it immediately
+    let (count, moves) = game.get_moves();
+
+    if count == 1 {
+        let best_move = moves[0];
+        let pv = vec![best_move];
+        print_uci_info(1, 0.0, &pv, &stats);
+
+        return SearchResult {
+            best_move,
+            evaluation: 0.0,
+            pv,
+        };
+    }
+
     // Start new search generation
     tt.new_search();
 
@@ -283,11 +297,7 @@ pub fn iterative_deepening(
     let mut killer_moves = KillerMoves::new(256);
 
     for depth in 1..=limits.max_depth.unwrap_or(256) {
-        stats.current_depth.store(depth as u64, Ordering::Relaxed);
-
-        // Clear killer moves for each iteration to avoid move ordering pollution
-        // between iterations (optional - you might want to keep them)
-        killer_moves.clear();
+        stats.current_depth = depth as u64;
 
         let result = alpha_beta(
             game,
@@ -297,7 +307,7 @@ pub fn iterative_deepening(
             f32::INFINITY,
             &previous_pv,
             &stop_flag,
-            &stats,
+            &mut stats,
             &limits,
             tt,
             position_history,
@@ -329,7 +339,7 @@ fn alpha_beta(
     mut beta: f32,
     previous_pv: &[BoardMove],
     stop_flag: &Arc<AtomicBool>,
-    stats: &Arc<SearchStats>,
+    stats: &mut SearchStats,
     limits: &SearchLimits,
     tt: &mut TranspositionTable,
     position_history: &mut PositionHistory,
@@ -341,10 +351,10 @@ fn alpha_beta(
     }
 
     // Threefold repetition checks
-    let zobrist_key = game.get_zobrist_key();
-    if ply > 1 && ply <= 4 {
+    let zobrist_key = game.zobrist_key;
+    if ply > 1 && ply <= 3 {
         if position_history.is_threefold_repetition(zobrist_key) {
-            return SearchResult::leaf(0.0); // Draw by repetition
+            return SearchResult::leaf(0.0);
         }
     }
 
@@ -392,7 +402,6 @@ fn alpha_beta(
     if depth >= 3 && !game.is_king_in_check(game.side) && beta.abs() < CHECKMATE_SCORE - 1000.0 {
         game.make_null_move();
 
-        // Search with reduced depth (R=2 or R=3 typically)
         let r = 2 + (depth >= 6) as usize;
         let null_result = alpha_beta(
             game,
@@ -436,7 +445,6 @@ fn alpha_beta(
         return SearchResult::leaf(eval);
     }
 
-    // Order moves with TT, PV, and killer moves
     let pv_move = previous_pv.get(0).copied();
     order_moves_with_heuristics(
         game,
@@ -453,8 +461,7 @@ fn alpha_beta(
     for (move_index, board_move) in moves[0..move_count].iter().enumerate() {
         game.make_move(*board_move);
 
-        // Add position to history for repetition detection
-        let new_zobrist = game.get_zobrist_key();
+        let new_zobrist = game.zobrist_key;
         position_history.push(new_zobrist);
 
         // Pass the PV for the next ply
@@ -466,14 +473,13 @@ fn alpha_beta(
 
         let mut search_depth = depth - 1;
 
-        if move_index >= 4  // After first few moves
-                && depth >= 3
-                && !game.is_capture(*board_move)
-                && !game.is_check(*board_move)
-                && !game.is_king_in_check(game.side)
+        if move_index >= 4
+            && depth >= 3
+            && !game.is_king_in_check(game.side)
+            && !game.is_capture(*board_move)
+            && !game.is_check(*board_move)
         {
-            // Reduce depth (can be more sophisticated)
-            search_depth = search_depth.saturating_sub(1);
+            search_depth = search_depth.div(2);
 
             // Search with reduced depth
             let reduced_result = alpha_beta(
@@ -493,16 +499,14 @@ fn alpha_beta(
 
             // If the move looks good, re-search at full depth
             if -reduced_result.evaluation > alpha {
-                search_depth = depth - 1; // Restore full depth
-            // Continue to do full search below
+                search_depth = depth - 1;
             } else {
                 position_history.pop();
                 game.unmake_move();
-                continue; // Skip this move
+                continue;
             }
         }
 
-        // Normal search (or re-search after LMR)
         let result = alpha_beta(
             game,
             search_depth,
@@ -518,7 +522,6 @@ fn alpha_beta(
             killer_moves,
         );
 
-        // Remove position from history after unmaking the move
         position_history.pop();
         game.unmake_move();
 
@@ -532,8 +535,6 @@ fn alpha_beta(
 
         alpha = alpha.max(value);
         if alpha >= beta {
-            // Update killer moves if this is a quiet move
-            // (captures use MVV-LVA ordering already)
             if !game.is_capture(*board_move) {
                 killer_moves.add_killer(ply, *board_move);
             }
@@ -541,7 +542,6 @@ fn alpha_beta(
         }
     }
 
-    // Store in transposition table
     let node_type = if best_value <= original_alpha {
         NodeType::UpperBound // No move improved alpha
     } else if best_value >= beta {
@@ -561,7 +561,7 @@ fn calculate_delta_margin(game: &Game, board_move: &BoardMove) -> f32 {
     // Add value of captured piece
     if let Some((victim_piece, _victim_color)) = game.pieces[board_move.get_to() as usize] {
         max_gain += if victim_piece == Piece::King {
-            10000.0 // Very high value for capturing a king
+            10000.0
         } else {
             get_piece_value(victim_piece)
         };
@@ -585,7 +585,7 @@ fn quiescence_search(
     mut alpha: f32,
     beta: f32,
     stop_flag: &Arc<AtomicBool>,
-    stats: &Arc<SearchStats>,
+    stats: &mut SearchStats,
     limits: &SearchLimits,
 ) -> SearchResult {
     stats.increment_nodes();
@@ -612,9 +612,6 @@ fn quiescence_search(
         alpha = stand_pat;
     }
 
-    // Delta pruning margin - add a small safety buffer
-    const DELTA_MARGIN: f32 = 50.0; // About half a pawn
-
     // Get all moves
     let (move_count, moves) = game.get_moves();
 
@@ -638,9 +635,9 @@ fn quiescence_search(
                 let max_gain = calculate_delta_margin(game, &board_move);
 
                 // Delta pruning: if even the best possible outcome can't improve alpha,
-                // skip this move
-                if stand_pat + max_gain + DELTA_MARGIN < alpha {
-                    continue; // Prune this move
+                // skip this move; margin is about a pawn
+                if stand_pat + max_gain + get_piece_value(Piece::Pawn) / 2.0 < alpha {
+                    continue;
                 }
             }
 
@@ -701,46 +698,21 @@ fn order_moves_with_heuristics(
     pv_move: Option<BoardMove>,
     killer_moves: [BoardMove; 2],
 ) {
-    // Assign scores to each move for sorting
-    let mut move_scores: Vec<(BoardMove, i32)> = moves
-        .iter()
-        .map(|&mv| {
-            let score;
-
-            // PV
-            if Some(mv) == pv_move {
-                score = 1_000_000;
-            }
-            // TT
-            else if Some(mv) == tt_move {
-                score = 900_000;
-            }
-            // Good captures (MVV-LVA)
-            else if game.is_capture(mv) {
-                score = 800_000 + mvv_lva_score(game, &mv);
-            }
-            // Killer moves
-            else if mv == killer_moves[0] {
-                score = 700_000;
-            } else if mv == killer_moves[1] {
-                score = 600_000;
-            }
-            // Other quiet moves are random
-            else {
-                score = 0;
-            }
-
-            (mv, score)
-        })
-        .collect();
-
-    // Sort by score (highest first)
-    move_scores.sort_unstable_by(|a, b| b.1.cmp(&a.1));
-
-    // Copy sorted moves back
-    for (i, (mv, _)) in move_scores.iter().enumerate() {
-        moves[i] = *mv;
-    }
+    moves.sort_unstable_by_key(|&mv| {
+        if Some(mv) == pv_move {
+            -1_000_000
+        } else if Some(mv) == tt_move {
+            -900_000
+        } else if game.is_capture(mv) {
+            -800_000 - mvv_lva_score(game, &mv)
+        } else if mv == killer_moves[0] {
+            -700_000
+        } else if mv == killer_moves[1] {
+            -600_000
+        } else {
+            0
+        }
+    });
 }
 
 fn mvv_lva_score(game: &Game, board_move: &BoardMove) -> i32 {
@@ -763,6 +735,5 @@ fn mvv_lva_score(game: &Game, board_move: &BoardMove) -> i32 {
         }
     }
 
-    // Non-captures get a negative score to be sorted after captures
     -1
 }

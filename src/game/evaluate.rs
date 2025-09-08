@@ -10,6 +10,7 @@ use crate::utils::square::BoardSquareExt;
 // will make it loose precision and the PLY info.
 pub const CHECKMATE_SCORE: f32 = 100_000.0;
 
+// Base piece values
 pub const PAWN_VALUE: f32 = 100.0;
 pub const KNIGHT_VALUE: f32 = 320.0;
 pub const BISHOP_VALUE: f32 = 330.0;
@@ -17,6 +18,8 @@ pub const ROOK_VALUE: f32 = 500.0;
 pub const QUEEN_VALUE: f32 = 900.0;
 pub const KING_VALUE: f32 = 0.0;
 
+// Multipliers for the piece tables
+// (since they're stored normalized)
 pub const PAWN_POSITION_MULTIPLIER: f32 = 50.0;
 pub const KNIGHT_POSITION_MULTIPLIER: f32 = 40.0;
 pub const BISHOP_POSITION_MULTIPLIER: f32 = 20.0;
@@ -27,7 +30,7 @@ pub const KING_LATE_POSITION_MULTIPLIER: f32 = 50.0;
 
 // Pawn structure bonuses/penalties
 pub const PASSED_PAWN_BONUS: [f32; 8] = [
-    0.0,   // Rank 1 (no pawn should be here)
+    0.0,   // Rank 1
     5.0,   // Rank 2
     10.0,  // Rank 3
     20.0,  // Rank 4
@@ -37,9 +40,12 @@ pub const PASSED_PAWN_BONUS: [f32; 8] = [
     0.0,   // Rank 8 (promoted)
 ];
 
+pub const PASSED_PAWN_LATE_MULTIPLIER: f32 = 0.5;
+
+pub const ISOLATED_PAWN_PENALTY: f32 = -15.0;
 pub const DOUBLED_PAWN_PENALTY: f32 = -10.0;
 
-pub const MOBILITY_MULTIPLIER: f32 = 2.0;
+pub const MOBILITY_MULTIPLIER: f32 = 0.5;
 pub const PAWN_MOBILITY_WEIGHT: f32 = 0.5;
 pub const KNIGHT_MOBILITY_WEIGHT: f32 = 4.0;
 pub const BISHOP_MOBILITY_WEIGHT: f32 = 3.0;
@@ -57,6 +63,7 @@ pub fn get_piece_value(piece: Piece) -> f32 {
     }
 }
 
+// Prefer center positions + pushes
 #[rustfmt::skip]
 const PAWN_TABLE: [f32; 64] = [
     0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0, 0.0,
@@ -69,6 +76,7 @@ const PAWN_TABLE: [f32; 64] = [
     0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0, 0.0,
 ];
 
+// Prefer center positions
 #[rustfmt::skip]
 const KNIGHT_TABLE: [f32; 64] = [
     0.0, 0.1,  0.2,  0.2,  0.2,  0.2,  0.1,  0.0,
@@ -81,6 +89,7 @@ const KNIGHT_TABLE: [f32; 64] = [
     0.0, 0.1,  0.2,  0.2,  0.2,  0.2,  0.1,  0.0,
 ];
 
+// Prefer mostly center positions / corners
 #[rustfmt::skip]
 const BISHOP_TABLE: [f32; 64] = [
     0.2, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.2,
@@ -112,8 +121,8 @@ const QUEEN_TABLE: [f32; 64] = [
     0.1,  0.0, 0.5, 0.5,  0.5,  0.5, 0.0, 0.1,
     0.05, 0.0, 0.5, 0.5,  0.5,  0.5, 0.0, 0.05,
     0.0,  0.0, 0.5, 0.5,  0.5,  0.5, 0.0, 0.05,
-    0.1,  0.5, 0.5, 0.5,  0.5,  0.5, 0.0, 0.1,
-    0.1,  0.0, 0.5, 0.0,  0.0,  0.0, 0.0, 0.1,
+    0.1,  0.0, 0.5, 0.5,  0.5,  0.5, 0.0, 0.1,
+    0.1,  0.0, 0.0, 0.0,  0.0,  0.0, 0.0, 0.1,
     0.2,  0.1, 0.1, 0.05, 0.05, 0.1, 0.1, 0.2,
 ];
 
@@ -126,7 +135,7 @@ const KING_EARLY_TABLE: [f32; 64] = [
     0.3, 0.2, 0.2, 0.1, 0.1, 0.2, 0.2, 0.3,
     0.4, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.4,
     0.7, 0.7, 0.5, 0.5, 0.5, 0.5, 0.7, 0.7,
-    0.7, 0.8, 0.6, 0.5, 0.5, 0.6, 0.8, 0.7, // castled positions favored
+    0.7, 0.7, 1.0, 0.5, 0.5, 0.6, 1.0, 0.7,
 ];
 
 #[rustfmt::skip]
@@ -141,8 +150,7 @@ const KING_LATE_TABLE: [f32; 64] = [
     0.0, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.0,
 ];
 
-// Helper function to get position table value for a piece at a given square
-fn get_position_value(piece: Piece, square: usize, color: Color, game_phase: f32) -> f32 {
+fn get_positional_piece_value(piece: Piece, square: usize, color: Color, game_phase: f32) -> f32 {
     let adjusted_square = match color {
         Color::Black => square,
         Color::White => 63 - square,
@@ -162,7 +170,6 @@ fn get_position_value(piece: Piece, square: usize, color: Color, game_phase: f32
         }
     };
 
-    // Apply the appropriate multiplier
     let multiplier = match piece {
         Piece::Pawn => PAWN_POSITION_MULTIPLIER,
         Piece::Knight => KNIGHT_POSITION_MULTIPLIER,
@@ -248,13 +255,32 @@ fn count_doubled_pawns(pawns: Bitboard) -> u32 {
         let file_mask = 0x0101010101010101u64 << file;
         let pawns_on_file = (pawns & file_mask).count_ones();
         if pawns_on_file > 1 {
-            doubled += pawns_on_file - 1; // Count extra pawns as doubled
+            doubled += pawns_on_file - 1;
         }
     }
 
     doubled
 }
 
+fn is_isolated_pawn(pawn_square: u8, friendly_pawns: Bitboard) -> bool {
+    return false;
+
+    let file = pawn_square.get_x();
+
+    const FILE_A: u64 = 0x0101010101010101;
+    const FILE_H: u64 = 0x8080808080808080;
+
+    let center_file = FILE_A << file;
+
+    let left_file = (center_file >> 1) & !FILE_H;
+    let right_file = (center_file << 1) & !FILE_A;
+
+    let adjacent_files_mask = left_file | right_file;
+
+    (adjacent_files_mask & friendly_pawns) == 0
+}
+
+// Update the evaluate_pawn_structure function to include isolated pawns
 pub fn evaluate_pawn_structure(game: &Game, game_phase: f32) -> f32 {
     let mut eval = 0.0;
 
@@ -266,16 +292,24 @@ pub fn evaluate_pawn_structure(game: &Game, game_phase: f32) -> f32 {
     for square in white_pawns.iter_positions() {
         if is_passed_pawn(square, Color::White, black_pawns) {
             let rank = (square / 8) as usize;
-            let bonus = PASSED_PAWN_BONUS[rank] * (1.0 + game_phase * 0.5);
+            let bonus = PASSED_PAWN_BONUS[rank] * (1.0 + game_phase * PASSED_PAWN_LATE_MULTIPLIER);
             eval += bonus;
+        }
+
+        if is_isolated_pawn(square, white_pawns) {
+            eval += ISOLATED_PAWN_PENALTY;
         }
     }
 
     for square in black_pawns.iter_positions() {
         if is_passed_pawn(square, Color::Black, white_pawns) {
             let rank = 7 - (square / 8) as usize;
-            let bonus = PASSED_PAWN_BONUS[rank] * (1.0 + game_phase * 0.5);
+            let bonus = PASSED_PAWN_BONUS[rank] * (1.0 + game_phase * PASSED_PAWN_LATE_MULTIPLIER);
             eval -= bonus;
+        }
+
+        if is_isolated_pawn(square, black_pawns) {
+            eval -= ISOLATED_PAWN_PENALTY;
         }
     }
 
@@ -299,7 +333,7 @@ pub fn evaluate_positional(game: &Game, game_phase: f32) -> f32 {
             game.piece_bitboards[piece] & game.color_bitboards[Color::White as usize];
         for square in white_pieces.iter_positions() {
             let position_value =
-                get_position_value(piece_type, square as usize, Color::White, game_phase);
+                get_positional_piece_value(piece_type, square as usize, Color::White, game_phase);
             positional += position_value;
         }
 
@@ -307,8 +341,8 @@ pub fn evaluate_positional(game: &Game, game_phase: f32) -> f32 {
             game.piece_bitboards[piece] & game.color_bitboards[Color::Black as usize];
         for square in black_pieces.iter_positions() {
             let position_value =
-                get_position_value(piece_type, square as usize, Color::Black, game_phase);
-            positional -= position_value; // Subtract for black pieces
+                get_positional_piece_value(piece_type, square as usize, Color::Black, game_phase);
+            positional -= position_value;
         }
     }
 
@@ -327,7 +361,7 @@ pub fn evaluate_mobility(game: &Game, game_phase: f32) -> f32 {
     let white_weighted = calculate_weighted_mobility(&game, &white_moves[..white_move_count]);
     let black_weighted = calculate_weighted_mobility(&game, &black_moves[..black_move_count]);
 
-    mobility_score = (white_weighted - black_weighted) * (1.0 + game_phase * 0.5);
+    mobility_score = (white_weighted - black_weighted) * (1.0 + game_phase * MOBILITY_MULTIPLIER);
 
     mobility_score
 }

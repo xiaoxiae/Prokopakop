@@ -1,4 +1,4 @@
-use crate::game::board::{BoardMove, Game};
+use crate::game::board::BoardMove;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -44,7 +44,6 @@ impl TranspositionTable {
         let entry_size = std::mem::size_of::<TTEntry>();
         let total_entries = (size_mb * 1024 * 1024) / entry_size;
 
-        // Round down to nearest power of 2 for efficient indexing
         let size = total_entries.next_power_of_two() / 2;
         let size_mask = size - 1;
 
@@ -57,19 +56,14 @@ impl TranspositionTable {
         }
     }
 
-    /// Increment generation for a new search
     pub fn new_search(&mut self) {
         self.generation = self.generation.wrapping_add(1);
     }
 
-    /// Get the index for a given zobrist key
-    #[inline]
     fn get_index(&self, key: u64) -> usize {
         (key as usize) & self.size_mask
     }
 
-    /// Probe the transposition table for a given position
-    /// Returns the entry if found, regardless of depth (for move ordering)
     pub fn probe(&self, key: u64) -> Option<TTEntry> {
         let index = self.get_index(key);
         let entry = &self.entries[index];
@@ -84,7 +78,6 @@ impl TranspositionTable {
         Some(entry.clone())
     }
 
-    /// Store an entry in the transposition table
     pub fn store(
         &mut self,
         key: u64,
@@ -118,8 +111,6 @@ impl TranspositionTable {
         }
     }
 
-    /// Clear all entries in the table
-    #[allow(dead_code)]
     pub fn clear(&mut self) {
         for entry in &mut self.entries {
             *entry = TTEntry::default();
@@ -127,25 +118,5 @@ impl TranspositionTable {
         self.generation = 0;
         self.hits.store(0, Ordering::Relaxed);
         self.misses.store(0, Ordering::Relaxed);
-    }
-
-    /// Get statistics about the table
-    #[allow(dead_code)]
-    pub fn get_stats(&self) -> (u64, u64) {
-        (
-            self.hits.load(Ordering::Relaxed),
-            self.misses.load(Ordering::Relaxed),
-        )
-    }
-}
-
-// Extension trait for Game to work with transposition table
-pub trait GameTranspositionExt {
-    fn get_zobrist_key(&self) -> u64;
-}
-
-impl GameTranspositionExt for Game {
-    fn get_zobrist_key(&self) -> u64 {
-        self.zobrist_key
     }
 }

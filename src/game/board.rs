@@ -1484,7 +1484,7 @@ impl Game {
 
     pub(crate) fn is_check(&mut self, board_move: BoardMove) -> bool {
         self.make_move(board_move);
-        let is_check = self.is_king_in_check(!self.side); // Check opponent's king (side was flipped in make_move)
+        let is_check = self.is_king_in_check(!self.side);
         self.unmake_move();
         is_check
     }
