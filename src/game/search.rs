@@ -450,7 +450,7 @@ fn alpha_beta(
     let mut best_value = -f32::INFINITY;
     let mut best_pv = Vec::new();
 
-    for board_move in moves[0..move_count].iter() {
+    for (move_index, board_move) in moves[0..move_count].iter().enumerate() {
         game.make_move(*board_move);
 
         // Add position to history for repetition detection
@@ -464,9 +464,48 @@ fn alpha_beta(
             &[]
         };
 
+        let mut search_depth = depth - 1;
+
+        if move_index >= 4  // After first few moves
+                && depth >= 3
+                && !game.is_capture(*board_move)
+                && !game.is_check(*board_move)
+                && !game.is_king_in_check(game.side)
+        {
+            // Reduce depth (can be more sophisticated)
+            search_depth = search_depth.saturating_sub(1);
+
+            // Search with reduced depth
+            let reduced_result = alpha_beta(
+                game,
+                search_depth,
+                ply + 1,
+                -beta,
+                -alpha,
+                next_pv,
+                stop_flag,
+                stats,
+                limits,
+                tt,
+                position_history,
+                killer_moves,
+            );
+
+            // If the move looks good, re-search at full depth
+            if -reduced_result.evaluation > alpha {
+                search_depth = depth - 1; // Restore full depth
+            // Continue to do full search below
+            } else {
+                position_history.pop();
+                game.unmake_move();
+                continue; // Skip this move
+            }
+        }
+
+        // Normal search (or re-search after LMR)
         let result = alpha_beta(
             game,
-            depth - 1,
+            search_depth,
             ply + 1,
             -beta,
             -alpha,
