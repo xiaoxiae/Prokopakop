@@ -1,11 +1,12 @@
 use super::pieces::{Color, Piece};
 use crate::game::evaluate::{
-    calculate_game_phase, evaluate_material, evaluate_mobility, evaluate_positional,
+    calculate_game_phase, evaluate_bishop_pair, evaluate_material, evaluate_mobility,
+    evaluate_positional,
 };
 use crate::game::pieces::ColoredPiece;
 use crate::utils::bitboard::{
     BLACK_PROMOTION_ROW, Bitboard, BitboardExt, MAGIC_BLOCKER_BITBOARD, PIECE_MOVE_BITBOARDS,
-    WHITE_PROMOTION_ROW,
+    RAY_BETWEEN, WHITE_PROMOTION_ROW,
 };
 use crate::utils::magic::{MAGIC_ENTRIES, MAGIC_TABLE};
 use crate::utils::square::{BoardSquare, BoardSquareExt};
@@ -996,14 +997,12 @@ impl Game {
                 & (raycast_2 & !raycast_1);
 
             for attacker_position in attacker_positions.iter_positions() {
-                let raycast_3 = self.get_occlusion_bitmap_const::<P>(
-                    attacker_position,
-                    self.all_pieces & !raycast_1,
-                );
+                let ray = RAY_BETWEEN[king_position as usize][attacker_position as usize];
 
-                let pinned_piece_position = (raycast_3 & raycast_1 & self.all_pieces).next_index();
+                let pinned_piece_bitboard = ray & self.all_pieces;
+                let pinned_piece_position = pinned_piece_bitboard.next_index();
 
-                let valid_positions = (raycast_2 & raycast_3) | (1 << attacker_position);
+                let valid_positions = ray | (1 << attacker_position);
 
                 let pin_info = PinInfo {
                     pinned_piece_position,

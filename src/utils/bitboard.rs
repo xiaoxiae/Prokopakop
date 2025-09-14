@@ -604,3 +604,75 @@ pub(crate) fn generate_magic_bitboards() {
         }
     }
 }
+
+type RayBetweenTable = [[Bitboard; 64]; 64];
+
+const fn calculate_ray_between_table() -> RayBetweenTable {
+    let mut table = [[0u64; 64]; 64];
+
+    let mut from_sq = 0;
+    while from_sq < 64 {
+        let from_x = (from_sq % 8) as i8;
+        let from_y = (from_sq / 8) as i8;
+
+        let mut to_sq = 0;
+        while to_sq < 64 {
+            let to_x = (to_sq % 8) as i8;
+            let to_y = (to_sq / 8) as i8;
+
+            let dx = to_x - from_x;
+            let dy = to_y - from_y;
+
+            // Check if squares are aligned (on same ray)
+            let aligned = if dx == 0 && dy != 0 {
+                true
+            } else if dy == 0 && dx != 0 {
+                true
+            } else if dx != 0 && dy != 0 && dx == dy {
+                true
+            } else if dx != 0 && dy != 0 && dx == -dy {
+                true
+            } else {
+                false
+            };
+
+            if aligned {
+                // Calculate step direction
+                let step_x = if dx == 0 {
+                    0
+                } else if dx > 0 {
+                    1
+                } else {
+                    -1
+                };
+                let step_y = if dy == 0 {
+                    0
+                } else if dy > 0 {
+                    1
+                } else {
+                    -1
+                };
+
+                let mut ray = 0u64;
+                let mut x = from_x + step_x;
+                let mut y = from_y + step_y;
+
+                while x != to_x || y != to_y {
+                    ray |= 1u64 << (x + y * 8);
+                    x += step_x;
+                    y += step_y;
+                }
+
+                table[from_sq][to_sq] = ray;
+            }
+
+            to_sq += 1;
+        }
+        from_sq += 1;
+    }
+
+    table
+}
+
+// is exclusive!
+pub(crate) const RAY_BETWEEN: RayBetweenTable = calculate_ray_between_table();
