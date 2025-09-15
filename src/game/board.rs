@@ -1465,8 +1465,9 @@ impl Game {
         let material_value = white_material - black_material;
         let positional_value = evaluate_positional(self, game_phase);
         let mobility_value = evaluate_mobility(self, game_phase);
+        let bistop_pair_value = evaluate_bishop_pair(self, game_phase);
 
-        material_value + positional_value + mobility_value
+        material_value + positional_value + mobility_value + bistop_pair_value
     }
 
     /// Play through a sequence of moves and record the zobrist hash after each move

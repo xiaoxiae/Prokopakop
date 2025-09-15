@@ -63,6 +63,9 @@ pub fn get_piece_value(piece: Piece) -> f32 {
     }
 }
 
+const BISHOP_PAIR_BASE_BONUS: f32 = 30.0;
+const BISHOP_PAIR_LATE_MULTIPLIER: f32 = 0.5;
+
 // Prefer center positions + pushes
 #[rustfmt::skip]
 const PAWN_TABLE: [f32; 64] = [
@@ -383,4 +386,26 @@ fn calculate_weighted_mobility(game: &Game, moves: &[BoardMove]) -> f32 {
     }
 
     weighted_mobility
+}
+
+pub fn evaluate_bishop_pair(game: &Game, game_phase: f32) -> f32 {
+    let mut eval = 0.0;
+
+    let white_bishops =
+        game.piece_bitboards[Piece::Bishop as usize] & game.color_bitboards[Color::White as usize];
+    let black_bishops =
+        game.piece_bitboards[Piece::Bishop as usize] & game.color_bitboards[Color::Black as usize];
+
+    let bishop_pair_bonus =
+        BISHOP_PAIR_BASE_BONUS * (1.0 + game_phase * BISHOP_PAIR_LATE_MULTIPLIER);
+
+    if white_bishops.count_ones() >= 2 {
+        eval += bishop_pair_bonus;
+    }
+
+    if black_bishops.count_ones() >= 2 {
+        eval -= bishop_pair_bonus;
+    }
+
+    eval
 }
