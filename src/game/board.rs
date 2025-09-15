@@ -1007,33 +1007,19 @@ impl Game {
     /// Returns the attack bitmap (ray from attacker to king) for blocking moves,
     /// plus the attacker position for capture moves.
     ///
-    fn get_single_slider_attack_data_const<C: ConstColor>(
+    fn get_slider_attack_data_const<PA: ConstPiece, C: ConstColor>(
         &self,
         position: BoardSquare,
     ) -> Bitboard {
-        // Check all slider pieces that could be attacking the king
-        for_each_simple_slider!(|P| {
-            // (1) Raycast from king to find potential attackers
-            let raycast_from_king = self.get_occlusion_bitmap_const::<P>(position, self.all_pieces);
+        let raycast_from_king = self.get_occlusion_bitmap_const::<PA>(position, self.all_pieces);
 
-            // Find enemy sliders (including queens) that could attack along this ray
-            let potential_attackers = (self.colored_piece_bitboard_const::<P, C::Opponent>()
-                | self.colored_piece_bitboard_const::<ConstQueen, C::Opponent>())
-                & raycast_from_king;
+        // Find enemy sliders (including queens) that could attack along this ray
+        let attacker_bitboard =
+            self.colored_piece_bitboard_const::<PA, C::Opponent>() & raycast_from_king;
 
-            // Check each potential attacker
-            for attacker_position in potential_attackers.iter_positions() {
-                // (2) Raycast back from attacker to king with current board state
-                let raycast_from_attacker =
-                    self.get_occlusion_bitmap_const::<P>(attacker_position, self.all_pieces);
+        let attacker_position = attacker_bitboard.next_index();
 
-                // Valid positions to block are the rays between the attacker and the king,
-                // and the attacker position
-                return (raycast_from_attacker & raycast_from_king) | attacker_position.to_mask();
-            }
-        });
-
-        panic!("No slider attacks found for king");
+        RAY_BETWEEN[position as usize][attacker_position as usize] | attacker_position.to_mask()
     }
 
     ///
@@ -1286,7 +1272,7 @@ impl Game {
                     & pin_mask;
             } else {
                 // If it is a slider, we can either take, or block
-                let attack_data = self.get_single_slider_attack_data_const::<C>(king_position);
+                let attack_data = self.get_slider_attack_data_const::<PA, C>(king_position);
 
                 bitboard = self.get_pseudo_legal_move_bitboard_const::<P, C>(square)
                     & attack_data
