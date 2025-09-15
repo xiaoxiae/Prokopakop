@@ -102,47 +102,40 @@ impl BoardMoveExt for u16 {
     }
 }
 
-#[derive(Debug, Clone, Default)]
-struct PinInfo {
-    pub pinned_piece_position: BoardSquare,
-    pub valid_move_squares: Bitboard,
-}
-
 #[derive(Debug, Clone)]
 struct PinData {
-    pub pins: [[PinInfo; 4]; 2], // [bishop_pins, rook_pins]
-    pub pin_counts: [usize; 2],  // [bishop_count, rook_count]
-    pub all_pinned_pieces: Bitboard,
-
-    pub pin_mask_lookup: [Bitboard; 64],
+    pub pinned_pieces: Bitboard,
+    pub pinner_squares: [BoardSquare; 64],
 }
 
 impl PinData {
-    fn default() -> Self {
+    fn new() -> Self {
         Self {
-            pins: Default::default(), // [[PinInfo; 4]; 2] can still derive Default
-            pin_counts: [0; 2],
-            all_pinned_pieces: 0,
-            pin_mask_lookup: [!0; 64], // manually initialize the 64-element array
+            pinned_pieces: 0,
+            pinner_squares: [BoardSquare::default(); 64],
         }
     }
 
-    /// Rebuilds the pin mask lookup table
-    pub fn rebuild_pin_mask_lookup(&mut self) {
-        self.pin_mask_lookup = [!0; 64];
-
-        for piece_type in 0..2 {
-            for i in 0..self.pin_counts[piece_type] {
-                let pin_info = &self.pins[piece_type][i];
-                let sq = pin_info.pinned_piece_position;
-                self.pin_mask_lookup[sq as usize] = pin_info.valid_move_squares;
-            }
-        }
+    pub fn add_pin(&mut self, pinned_square: BoardSquare, pinner_square: BoardSquare) {
+        self.pinned_pieces |= 1 << pinned_square;
+        self.pinner_squares[pinned_square as usize] = pinner_square as u8;
     }
 
-    /// Get pin mask for a specific square using the lookup table
-    pub fn get_pin_mask_for_square(&self, square: BoardSquare) -> Bitboard {
-        self.pin_mask_lookup[square as usize]
+    pub fn get_pin_mask_for_square(
+        &self,
+        square: BoardSquare,
+        king_position: BoardSquare,
+    ) -> Bitboard {
+        if !self.pinned_pieces.is_set(square) {
+            // all squares are allowed
+            return !Bitboard::default();
+        }
+
+        // otherwise it's ray between + the piece
+        let pinner_square = self.pinner_squares[square as usize];
+        let ray = RAY_BETWEEN[pinner_square as usize][king_position as usize];
+
+        ray | pinner_square.to_mask()
     }
 }
 
@@ -985,7 +978,7 @@ impl Game {
     ///
     fn get_pinner_bitboards_const<C: ConstColor>(&self) -> PinData {
         let king_position = self.get_king_position_const::<C>();
-        let mut pin_data = PinData::default();
+        let mut pin_data = PinData::new();
 
         for_each_simple_slider!(|P| {
             let raycast_1 = self.get_occlusion_bitmap_const::<P>(king_position, self.all_pieces);
@@ -1002,20 +995,9 @@ impl Game {
                 let pinned_piece_bitboard = ray & self.all_pieces;
                 let pinned_piece_position = pinned_piece_bitboard.next_index();
 
-                let valid_positions = ray | (1 << attacker_position);
-
-                let pin_info = PinInfo {
-                    pinned_piece_position,
-                    valid_move_squares: valid_positions,
-                };
-
-                pin_data.all_pinned_pieces |= 1 << pinned_piece_position;
-                pin_data.pins[P::PIECE_INDEX][pin_data.pin_counts[P::PIECE_INDEX]] = pin_info;
-                pin_data.pin_counts[P::PIECE_INDEX] += 1;
+                pin_data.add_pin(pinned_piece_position, attacker_position);
             }
         });
-
-        pin_data.rebuild_pin_mask_lookup();
 
         pin_data
     }
@@ -1191,7 +1173,8 @@ impl Game {
         // for non-pawn pieces, just move
         if P::PIECE != Piece::Pawn {
             for square in move_bitboard.iter_positions() {
-                let pin_mask = pin_data.get_pin_mask_for_square(square);
+                let pin_mask = pin_data.get_pin_mask_for_square(square, king_position);
+
                 let pseudo_legal_move_bitboard =
                     self.get_pseudo_legal_move_bitboard_const::<P, C>(square);
 
@@ -1215,7 +1198,7 @@ impl Game {
 
         // TODO: this is too much repeated code, refactor because ewwwwwwwww
         for square in (move_bitboard & promotion_mask).iter_positions() {
-            let pin_mask = pin_data.get_pin_mask_for_square(square);
+            let pin_mask = pin_data.get_pin_mask_for_square(square, king_position);
             let pseudo_legal_move_bitboard =
                 self.get_pseudo_legal_move_bitboard_const::<ConstPawn, C>(square);
 
@@ -1242,7 +1225,7 @@ impl Game {
         }
 
         for square in (move_bitboard & !promotion_mask).iter_positions() {
-            let pin_mask = pin_data.get_pin_mask_for_square(square);
+            let pin_mask = pin_data.get_pin_mask_for_square(square, king_position);
             let pseudo_legal_move_bitboard =
                 self.get_pseudo_legal_move_bitboard_const::<ConstPawn, C>(square);
 
@@ -1279,7 +1262,7 @@ impl Game {
         // go through all non-king pieces
         for square in move_bitboard.iter_positions() {
             // Get pin mask for this square if it's pinned
-            let pin_mask = pin_data.get_pin_mask_for_square(square);
+            let pin_mask = pin_data.get_pin_mask_for_square(square, king_position);
 
             let bitboard;
 
