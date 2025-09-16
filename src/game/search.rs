@@ -1,5 +1,4 @@
 use std::fmt::{Display, Formatter, Result};
-use std::ops::Div;
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
@@ -200,7 +199,13 @@ impl PositionHistory {
 }
 
 /// Formats and prints UCI info string
-pub fn print_uci_info(depth: usize, score: f32, pv: &[BoardMove], stats: &SearchStats) {
+pub fn print_uci_info(
+    depth: usize,
+    score: f32,
+    pv: &[BoardMove],
+    stats: &SearchStats,
+    tt: &mut TranspositionTable,
+) {
     let mut info = format!("info depth {}", depth);
 
     // Check if this is a checkmate score
@@ -223,7 +228,7 @@ pub fn print_uci_info(depth: usize, score: f32, pv: &[BoardMove], stats: &Search
         }
     } else {
         // Regular centipawn score
-        info.push_str(&format!(" score cp {}", (score * 100.0) as i32));
+        info.push_str(&format!(" score cp {}", score));
     }
 
     // Add nodes
@@ -234,6 +239,14 @@ pub fn print_uci_info(depth: usize, score: f32, pv: &[BoardMove], stats: &Search
 
     // Add time
     info.push_str(&format!(" time {}", stats.get_elapsed_ms()));
+
+    // Add hashtable information
+    info.push_str(&format!(" hashfull {}", tt.get_fullness_permille()));
+
+    let hit_rate = tt.get_hit_rate_percent();
+    if hit_rate > 0 {
+        info.push_str(&format!(" tbhits {}", hit_rate));
+    }
 
     // Add principal variation
     if !pv.is_empty() {
@@ -265,7 +278,7 @@ pub fn iterative_deepening(
 
             // Use a neutral evaluation since opening book moves don't have evaluations
             let pv = vec![best_move];
-            print_uci_info(1, 0.0, &pv, &stats);
+            print_uci_info(1, 0.0, &pv, &stats, tt);
 
             return SearchResult {
                 best_move,
@@ -281,7 +294,7 @@ pub fn iterative_deepening(
     if count == 1 {
         let best_move = moves[0];
         let pv = vec![best_move];
-        print_uci_info(1, 0.0, &pv, &stats);
+        print_uci_info(1, 0.0, &pv, &stats, tt);
 
         return SearchResult {
             best_move,
@@ -315,7 +328,7 @@ pub fn iterative_deepening(
         );
 
         if !stats.should_stop(&limits, &stop_flag) {
-            print_uci_info(depth, result.evaluation, &result.pv, &stats);
+            print_uci_info(depth, result.evaluation, &result.pv, &stats, tt);
             best_result = result.clone();
             previous_pv = result.pv;
 
@@ -350,7 +363,7 @@ fn alpha_beta(
         return SearchResult::leaf(game.evaluate() * game.side);
     }
 
-    // Threefold repetition checks
+    // Threefold repetition checks (only for low depths since this one is costly)
     let zobrist_key = game.zobrist_key;
     if ply > 1 && ply <= 3 {
         if position_history.is_threefold_repetition(zobrist_key) {
