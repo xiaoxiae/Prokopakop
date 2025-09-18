@@ -187,7 +187,7 @@ pub fn print_uci_info(
         }
     } else {
         // Regular centipawn score
-        info.push_str(&format!(" score cp {}", score));
+        info.push_str(&format!(" score cp {}", score as i32));
     }
 
     // Add nodes
