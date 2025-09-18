@@ -271,20 +271,36 @@ pub fn iterative_deepening(
     for depth in 1..=limits.max_depth.unwrap_or(256) {
         stats.current_depth = depth as u64;
 
-        let result = alpha_beta(
-            game,
-            depth,
-            1,
-            -f32::INFINITY,
-            f32::INFINITY,
-            &previous_pv,
-            &stop_flag,
-            &mut stats,
-            &limits,
-            tt,
-            position_history,
-            &mut killer_moves,
-        );
+        let result = if depth > 1 && !best_result.pv.is_empty() {
+            aspiration_search(
+                game,
+                depth,
+                best_result.evaluation,
+                &previous_pv,
+                best_result.best_move,
+                &stop_flag,
+                &mut stats,
+                &limits,
+                tt,
+                position_history,
+                &mut killer_moves,
+            )
+        } else {
+            alpha_beta(
+                game,
+                depth,
+                1,
+                -f32::INFINITY,
+                f32::INFINITY,
+                &previous_pv,
+                &stop_flag,
+                &mut stats,
+                &limits,
+                tt,
+                position_history,
+                &mut killer_moves,
+            )
+        };
 
         if !stats.should_stop(&limits, &stop_flag) {
             print_uci_info(depth, result.evaluation, &result.pv, &stats, tt);
@@ -549,6 +565,132 @@ fn calculate_delta_margin(game: &Game, board_move: &BoardMove) -> f32 {
     }
 
     max_gain
+}
+
+fn aspiration_search(
+    game: &mut Game,
+    depth: usize,
+    previous_score: f32,
+    previous_pv: &[BoardMove],
+    previous_best_move: BoardMove,
+    stop_flag: &Arc<AtomicBool>,
+    stats: &mut SearchStats,
+    limits: &SearchLimits,
+    tt: &mut TranspositionTable,
+    position_history: &mut PositionHistory,
+    killer_moves: &mut KillerMoves,
+) -> SearchResult {
+    // Don't use aspiration windows for checkmate scores
+    if previous_score.abs() > CHECKMATE_SCORE - 1000.0 {
+        return alpha_beta(
+            game,
+            depth,
+            1,
+            -f32::INFINITY,
+            f32::INFINITY,
+            previous_pv,
+            stop_flag,
+            stats,
+            limits,
+            tt,
+            position_history,
+            killer_moves,
+        );
+    }
+
+    let mut window = 50.0;
+
+    loop {
+        let alpha = previous_score - window;
+        let beta = previous_score + window;
+
+        let result = alpha_beta(
+            game,
+            depth,
+            1,
+            alpha,
+            beta,
+            previous_pv,
+            stop_flag,
+            stats,
+            limits,
+            tt,
+            position_history,
+            killer_moves,
+        );
+
+        // If search was interrupted and returned empty move, fall back to previous result
+        if result.best_move == BoardMove::empty() && previous_best_move != BoardMove::empty() {
+            return SearchResult {
+                best_move: previous_best_move,
+                evaluation: previous_score,
+                pv: previous_pv.to_vec(),
+            };
+        }
+
+        // Check if we should stop before continuing
+        if stats.should_stop(limits, stop_flag) {
+            if result.best_move == BoardMove::empty() && previous_best_move != BoardMove::empty() {
+                return SearchResult {
+                    best_move: previous_best_move,
+                    evaluation: previous_score,
+                    pv: previous_pv.to_vec(),
+                };
+            }
+            return result;
+        }
+
+        if result.evaluation <= alpha {
+            // Fail low - widen window and re-search
+            window *= 2.5;
+            println!(
+                "info string Aspiration fail low at depth {}, widening window to {:.1}",
+                depth, window
+            );
+        } else if result.evaluation >= beta {
+            // Fail high - widen window and re-search
+            window *= 2.5;
+            println!(
+                "info string Aspiration fail high at depth {}, widening window to {:.1}",
+                depth, window
+            );
+        } else {
+            // Success - return the result
+            return result;
+        }
+
+        // If window gets too big, fall back to full window search
+        if window > 1000.0 {
+            println!("info string Aspiration window too wide, using full window search");
+            let fallback_result = alpha_beta(
+                game,
+                depth,
+                1,
+                -f32::INFINITY,
+                f32::INFINITY,
+                previous_pv,
+                stop_flag,
+                stats,
+                limits,
+                tt,
+                position_history,
+                killer_moves,
+            );
+
+            // If even the fallback search returns empty move, use previous move
+            if fallback_result.best_move == BoardMove::empty()
+                && previous_best_move != BoardMove::empty()
+            {
+                return SearchResult {
+                    best_move: previous_best_move,
+                    evaluation: previous_score,
+                    pv: previous_pv.to_vec(),
+                };
+            }
+
+            return fallback_result;
+        }
+    }
 }
 
 fn quiescence_search(
