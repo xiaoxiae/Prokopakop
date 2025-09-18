@@ -7,6 +7,22 @@ mod tests {
     use std::fs;
 
     #[test]
+    fn test_null_move() {
+        let mut controller = GameController::new();
+
+        controller.new_game_from_fen(
+            "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+        );
+
+        let original_hash = controller.game.zobrist_key;
+
+        controller.game.make_null_move();
+        assert_ne!(original_hash, controller.game.zobrist_key);
+        controller.game.unmake_null_move();
+        assert_eq!(original_hash, controller.game.zobrist_key);
+    }
+
+    #[test]
     #[cfg(not(debug_assertions))]
     fn test_zobrist_key_consistency() {
         let mut controller = GameController::new();
