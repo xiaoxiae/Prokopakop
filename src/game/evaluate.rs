@@ -20,14 +20,11 @@ pub const KING_VALUE: f32 = 0.0;
 
 // Multipliers for the piece tables
 // (since they're stored normalized)
-pub const GLOBAL_POSITION_MULTIPLIER: f32 = 1.0;
-
 pub const PAWN_POSITION_MULTIPLIER: f32 = 50.0;
 pub const KNIGHT_POSITION_MULTIPLIER: f32 = 40.0;
 pub const BISHOP_POSITION_MULTIPLIER: f32 = 20.0;
 pub const ROOK_POSITION_MULTIPLIER: f32 = 30.0;
 pub const QUEEN_POSITION_MULTIPLIER: f32 = 20.0;
-
 pub const KING_EARLY_POSITION_MULTIPLIER: f32 = 40.0;
 pub const KING_LATE_POSITION_MULTIPLIER: f32 = 50.0;
 
@@ -43,117 +40,17 @@ pub const PASSED_PAWN_BONUS: [f32; 8] = [
     0.0,   // Rank 8 (promoted)
 ];
 
-pub const PASSED_PAWN_LATE_MULTIPLIER: f32 = 3.0;
+pub const PASSED_PAWN_LATE_MULTIPLIER: f32 = 0.5;
 
 pub const ISOLATED_PAWN_PENALTY: f32 = -15.0;
 pub const DOUBLED_PAWN_PENALTY: f32 = -10.0;
 
-pub const MOBILITY_MULTIPLIER: f32 = 4.0;
-
-pub const PAWN_MOBILITY_WEIGHT: f32 = 0.0;
+pub const MOBILITY_MULTIPLIER: f32 = 0.5;
+pub const PAWN_MOBILITY_WEIGHT: f32 = 0.5;
 pub const KNIGHT_MOBILITY_WEIGHT: f32 = 4.0;
-pub const BISHOP_MOBILITY_WEIGHT: f32 = 1.0;
-pub const ROOK_MOBILITY_WEIGHT: f32 = 1.0;
+pub const BISHOP_MOBILITY_WEIGHT: f32 = 3.0;
+pub const ROOK_MOBILITY_WEIGHT: f32 = 2.0;
 pub const QUEEN_MOBILITY_WEIGHT: f32 = 1.0;
-
-const BISHOP_PAIR_BASE_BONUS: f32 = 30.0;
-const BISHOP_PAIR_LATE_MULTIPLIER: f32 = 1.5;
-
-#[rustfmt::skip]
-const PAWN_EARLY_TABLE: [f32; 64] = [
-     0.00,  0.00,  0.00,  0.00,  0.00,  0.00,  0.00,  0.00,
-     0.50,  0.50,  0.50,  0.50,  0.50,  0.50,  0.50,  0.50,
-     0.10,  0.10,  0.20,  0.30,  0.30,  0.20,  0.10,  0.10,
-     0.05,  0.05,  0.10,  0.25,  0.25,  0.10,  0.05,  0.05,
-     0.00,  0.00,  0.00,  0.20,  0.20,  0.00,  0.00,  0.00,
-     0.05, -0.05, -0.10,  0.00,  0.00, -0.10, -0.05,  0.05,
-     0.05,  0.10,  0.10, -0.20, -0.20,  0.10,  0.10,  0.05,
-     0.00,  0.00,  0.00,  0.00,  0.00,  0.00,  0.00,  0.00,
-];
-
-#[rustfmt::skip]
-const PAWN_LATE_TABLE: [f32; 64] = [
-     0.00,  0.00,  0.00,  0.00,  0.00,  0.00,  0.00,  0.00,
-     1.50,  1.50,  1.50,  1.50,  1.50,  1.50,  1.50,  1.50,
-     0.50,  0.50,  0.50,  0.50,  0.50,  0.50,  0.50,  0.50,
-     0.20,  0.20,  0.20,  0.30,  0.30,  0.20,  0.20,  0.20,
-     0.10,  0.10,  0.10,  0.20,  0.20,  0.10,  0.10,  0.10,
-     0.05,  0.05,  0.05,  0.10,  0.10,  0.05,  0.05,  0.05,
-     0.00,  0.00,  0.00,  0.00,  0.00,  0.00,  0.00,  0.00,
-     0.00,  0.00,  0.00,  0.00,  0.00,  0.00,  0.00,  0.00,
-];
-
-#[rustfmt::skip]
-const KNIGHT_TABLE: [f32; 64] = [
-    -0.50, -0.40, -0.30, -0.30, -0.30, -0.30, -0.40, -0.50,
-    -0.40, -0.20,  0.00,  0.00,  0.00,  0.00, -0.20, -0.40,
-    -0.30,  0.00,  0.10,  0.15,  0.15,  0.10,  0.00, -0.30,
-    -0.30,  0.05,  0.15,  0.20,  0.20,  0.15,  0.05, -0.30,
-    -0.30,  0.00,  0.15,  0.20,  0.20,  0.15,  0.00, -0.30,
-    -0.30,  0.05,  0.10,  0.15,  0.15,  0.10,  0.05, -0.30,
-    -0.40, -0.20,  0.00,  0.05,  0.05,  0.00, -0.20, -0.40,
-    -0.50, -0.40, -0.30, -0.30, -0.30, -0.30, -0.40, -0.50,
-];
-
-#[rustfmt::skip]
-const BISHOP_TABLE: [f32; 64] = [
-    -0.20, -0.10, -0.10, -0.10, -0.10, -0.10, -0.10, -0.20,
-    -0.10,  0.00,  0.00,  0.00,  0.00,  0.00,  0.00, -0.10,
-    -0.10,  0.00,  0.05,  0.10,  0.10,  0.05,  0.00, -0.10,
-    -0.10,  0.05,  0.05,  0.10,  0.10,  0.05,  0.05, -0.10,
-    -0.10,  0.00,  0.10,  0.10,  0.10,  0.10,  0.00, -0.10,
-    -0.10,  0.10,  0.10,  0.10,  0.10,  0.10,  0.10, -0.10,
-    -0.10,  0.05,  0.00,  0.00,  0.00,  0.00,  0.05, -0.10,
-    -0.20, -0.10, -0.10, -0.10, -0.10, -0.10, -0.10, -0.20,
-];
-
-#[rustfmt::skip]
-const ROOK_TABLE: [f32; 64] = [
-     0.00,  0.00,  0.00,  0.00,  0.00,  0.00,  0.00,  0.00,
-     0.05,  0.10,  0.10,  0.10,  0.10,  0.10,  0.10,  0.05,
-    -0.05,  0.00,  0.00,  0.00,  0.00,  0.00,  0.00, -0.05,
-    -0.05,  0.00,  0.00,  0.00,  0.00,  0.00,  0.00, -0.05,
-    -0.05,  0.00,  0.00,  0.00,  0.00,  0.00,  0.00, -0.05,
-    -0.05,  0.00,  0.00,  0.00,  0.00,  0.00,  0.00, -0.05,
-    -0.05,  0.00,  0.00,  0.00,  0.00,  0.00,  0.00, -0.05,
-     0.00,  0.00,  0.00,  0.05,  0.05,  0.00,  0.00,  0.00,
-];
-
-#[rustfmt::skip]
-const QUEEN_TABLE: [f32; 64] = [
-    -0.20, -0.10, -0.10, -0.05, -0.05, -0.10, -0.10, -0.20,
-    -0.10,  0.00,  0.00,  0.00,  0.00,  0.00,  0.00, -0.10,
-    -0.10,  0.00,  0.05,  0.05,  0.05,  0.05,  0.00, -0.10,
-    -0.05,  0.00,  0.05,  0.05,  0.05,  0.05,  0.00, -0.05,
-     0.00,  0.00,  0.05,  0.05,  0.05,  0.05,  0.00, -0.05,
-    -0.10,  0.05,  0.05,  0.05,  0.05,  0.05,  0.00, -0.10,
-    -0.10,  0.00,  0.05,  0.00,  0.00,  0.00,  0.00, -0.10,
-    -0.20, -0.10, -0.10, -0.05, -0.05, -0.10, -0.10, -0.20,
-];
-
-#[rustfmt::skip]
-const KING_EARLY_TABLE: [f32; 64] = [
-    -0.30, -0.40, -0.40, -0.50, -0.50, -0.40, -0.40, -0.30,
-    -0.30, -0.40, -0.40, -0.50, -0.50, -0.40, -0.40, -0.30,
-    -0.30, -0.40, -0.40, -0.50, -0.50, -0.40, -0.40, -0.30,
-    -0.30, -0.40, -0.40, -0.50, -0.50, -0.40, -0.40, -0.30,
-    -0.20, -0.30, -0.30, -0.40, -0.40, -0.30, -0.30, -0.20,
-    -0.10, -0.20, -0.20, -0.20, -0.20, -0.20, -0.20, -0.10,
-     0.20,  0.20,  0.00,  0.00,  0.00,  0.00,  0.20,  0.20,
-     0.20,  0.30,  0.10,  0.00,  0.00,  0.10,  0.30,  0.20,
-];
-
-#[rustfmt::skip]
-const KING_LATE_TABLE: [f32; 64] = [
-    -0.50, -0.40, -0.30, -0.20, -0.20, -0.30, -0.40, -0.50,
-    -0.30, -0.20, -0.10,  0.00,  0.00, -0.10, -0.20, -0.30,
-    -0.30, -0.10,  0.20,  0.30,  0.30,  0.20, -0.10, -0.30,
-    -0.30, -0.10,  0.30,  0.40,  0.40,  0.30, -0.10, -0.30,
-    -0.30, -0.10,  0.30,  0.40,  0.40,  0.30, -0.10, -0.30,
-    -0.30, -0.10,  0.20,  0.30,  0.30,  0.20, -0.10, -0.30,
-    -0.30, -0.30,  0.00,  0.00,  0.00,  0.00, -0.30, -0.30,
-    -0.50, -0.30, -0.30, -0.30, -0.30, -0.30, -0.30, -0.50,
-];
 
 pub fn get_piece_value(piece: Piece) -> f32 {
     match piece {
@@ -166,6 +63,96 @@ pub fn get_piece_value(piece: Piece) -> f32 {
     }
 }
 
+const BISHOP_PAIR_BASE_BONUS: f32 = 30.0;
+const BISHOP_PAIR_LATE_MULTIPLIER: f32 = 0.5;
+
+// Prefer center positions + pushes
+#[rustfmt::skip]
+const PAWN_TABLE: [f32; 64] = [
+    0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0, 0.0,
+    1.0,  1.0,  1.0,  1.0,  1.0,  1.0,  1.0, 1.0,
+    0.2,  0.2,  0.4,  0.6,  0.6,  0.4,  0.2, 0.2,
+    0.1,  0.1,  0.2,  0.5,  0.5,  0.2,  0.1, 0.1,
+    0.0,  0.0,  0.0,  0.4,  0.4,  0.0,  0.0, 0.0,
+    0.1, -0.1, -0.2,  0.0,  0.0, -0.2, -0.1, 0.1,
+    0.1,  0.2,  0.2, -0.4, -0.4,  0.2,  0.2, 0.1,
+    0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0, 0.0,
+];
+
+// Prefer center positions
+#[rustfmt::skip]
+const KNIGHT_TABLE: [f32; 64] = [
+    0.0, 0.1,  0.2,  0.2,  0.2,  0.2,  0.1,  0.0,
+    0.1, 0.3,  0.5,  0.5,  0.5,  0.5,  0.3,  0.1,
+    0.2, 0.5,  0.6,  0.65, 0.65, 0.6,  0.5,  0.2,
+    0.2, 0.55, 0.65, 0.7,  0.7,  0.65, 0.55, 0.2,
+    0.2, 0.5,  0.65, 0.7,  0.7,  0.65, 0.5,  0.2,
+    0.2, 0.55, 0.6,  0.65, 0.65, 0.6,  0.55, 0.2,
+    0.1, 0.3,  0.5,  0.55, 0.55, 0.5,  0.3,  0.1,
+    0.0, 0.1,  0.2,  0.2,  0.2,  0.2,  0.1,  0.0,
+];
+
+// Prefer mostly center positions / corners
+#[rustfmt::skip]
+const BISHOP_TABLE: [f32; 64] = [
+    0.2, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.2,
+    0.1, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.1,
+    0.1, 0.3, 0.4, 0.5, 0.5, 0.4, 0.3, 0.1,
+    0.1, 0.3, 0.5, 0.6, 0.6, 0.5, 0.3, 0.1,
+    0.1, 0.3, 0.5, 0.6, 0.6, 0.5, 0.3, 0.1,
+    0.1, 0.4, 0.4, 0.5, 0.5, 0.4, 0.4, 0.1,
+    0.1, 0.5, 0.3, 0.3, 0.3, 0.3, 0.5, 0.1,
+    0.2, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.2,
+];
+
+#[rustfmt::skip]
+const ROOK_TABLE: [f32; 64] = [
+    0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5,
+    0.5, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6, 0.5,
+    0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+    0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+    0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+    0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+    1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0,
+    0.5, 0.5, 0.5, 0.6, 0.6, 0.5, 0.5, 0.5,
+];
+
+#[rustfmt::skip]
+const QUEEN_TABLE: [f32; 64] = [
+    0.2,  0.1, 0.1, 0.05, 0.05, 0.1, 0.1, 0.2,
+    0.1,  0.0, 0.0, 0.0,  0.0,  0.0, 0.0, 0.1,
+    0.1,  0.0, 0.5, 0.5,  0.5,  0.5, 0.0, 0.1,
+    0.05, 0.0, 0.5, 0.5,  0.5,  0.5, 0.0, 0.05,
+    0.0,  0.0, 0.5, 0.5,  0.5,  0.5, 0.0, 0.05,
+    0.1,  0.0, 0.5, 0.5,  0.5,  0.5, 0.0, 0.1,
+    0.1,  0.0, 0.0, 0.0,  0.0,  0.0, 0.0, 0.1,
+    0.2,  0.1, 0.1, 0.05, 0.05, 0.1, 0.1, 0.2,
+];
+
+#[rustfmt::skip]
+const KING_EARLY_TABLE: [f32; 64] = [
+    0.2, 0.1, 0.1, 0.0, 0.0, 0.1, 0.1, 0.2,
+    0.2, 0.1, 0.1, 0.0, 0.0, 0.1, 0.1, 0.2,
+    0.2, 0.1, 0.1, 0.0, 0.0, 0.1, 0.1, 0.2,
+    0.2, 0.1, 0.1, 0.0, 0.0, 0.1, 0.1, 0.2,
+    0.3, 0.2, 0.2, 0.1, 0.1, 0.2, 0.2, 0.3,
+    0.4, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.4,
+    0.7, 0.7, 0.5, 0.5, 0.5, 0.5, 0.7, 0.7,
+    0.7, 0.7, 1.0, 0.5, 0.5, 0.6, 1.0, 0.7,
+];
+
+#[rustfmt::skip]
+const KING_LATE_TABLE: [f32; 64] = [
+    0.0, 0.1, 0.2, 0.3, 0.3, 0.2, 0.1, 0.0,
+    0.2, 0.3, 0.4, 0.5, 0.5, 0.4, 0.3, 0.2,
+    0.2, 0.4, 0.7, 0.8, 0.8, 0.7, 0.4, 0.2,
+    0.2, 0.4, 0.8, 0.9, 0.9, 0.8, 0.4, 0.2,
+    0.2, 0.4, 0.8, 0.9, 0.9, 0.8, 0.4, 0.2,
+    0.2, 0.4, 0.7, 0.8, 0.8, 0.7, 0.4, 0.2,
+    0.2, 0.2, 0.5, 0.5, 0.5, 0.5, 0.2, 0.2,
+    0.0, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.0,
+];
+
 fn get_positional_piece_value(piece: Piece, square: usize, color: Color, game_phase: f32) -> f32 {
     let adjusted_square = match color {
         Color::Black => square,
@@ -173,12 +160,7 @@ fn get_positional_piece_value(piece: Piece, square: usize, color: Color, game_ph
     };
 
     let normalized_value = match piece {
-        Piece::Pawn => {
-            // Interpolate between early and late game king tables based on game phase
-            let early_value = PAWN_EARLY_TABLE[adjusted_square];
-            let late_value = PAWN_LATE_TABLE[adjusted_square];
-            early_value * (1.0 - game_phase) + late_value * game_phase
-        }
+        Piece::Pawn => PAWN_TABLE[adjusted_square],
         Piece::Knight => KNIGHT_TABLE[adjusted_square],
         Piece::Bishop => BISHOP_TABLE[adjusted_square],
         Piece::Rook => ROOK_TABLE[adjusted_square],
@@ -202,7 +184,7 @@ fn get_positional_piece_value(piece: Piece, square: usize, color: Color, game_ph
             KING_EARLY_POSITION_MULTIPLIER * (1.0 - game_phase)
                 + KING_LATE_POSITION_MULTIPLIER * game_phase
         }
-    } * GLOBAL_POSITION_MULTIPLIER;
+    };
 
     normalized_value * multiplier
 }
@@ -248,27 +230,13 @@ fn is_passed_pawn(pawn_square: u8, color: Color, enemy_pawns: Bitboard) -> bool 
 
     let center_file = FILE_A << file;
 
-    let left_file = if file > 0 {
-        (center_file >> 1) & !FILE_H
-    } else {
-        0
-    };
-    let right_file = if file < 7 {
-        (center_file << 1) & !FILE_A
-    } else {
-        0
-    };
+    let left_file = (center_file >> 1) & !FILE_H;
+    let right_file = (center_file << 1) & !FILE_A;
 
     let files_mask = center_file | left_file | right_file;
 
     let rank_mask = match color {
-        Color::White => {
-            if rank < 7 {
-                0xFFFFFFFFFFFFFFFFu64 << ((rank + 1) * 8)
-            } else {
-                0
-            }
-        }
+        Color::White => 0xFFFFFFFFFFFFFFFFu64 << ((rank + 1) * 8),
         Color::Black => {
             if rank > 0 {
                 (1u64 << (rank * 8)) - 1
@@ -298,20 +266,24 @@ fn count_doubled_pawns(pawns: Bitboard) -> u32 {
 }
 
 fn is_isolated_pawn(pawn_square: u8, friendly_pawns: Bitboard) -> bool {
+    return false;
+
     let file = pawn_square.get_x();
 
-    // Create adjacent files mask
-    let mut adjacent_mask = 0u64;
-    if file > 0 {
-        adjacent_mask |= 0x0101010101010101u64 << (file - 1);
-    }
-    if file < 7 {
-        adjacent_mask |= 0x0101010101010101u64 << (file + 1);
-    }
+    const FILE_A: u64 = 0x0101010101010101;
+    const FILE_H: u64 = 0x8080808080808080;
 
-    (adjacent_mask & friendly_pawns) == 0
+    let center_file = FILE_A << file;
+
+    let left_file = (center_file >> 1) & !FILE_H;
+    let right_file = (center_file << 1) & !FILE_A;
+
+    let adjacent_files_mask = left_file | right_file;
+
+    (adjacent_files_mask & friendly_pawns) == 0
 }
 
+// Update the evaluate_pawn_structure function to include isolated pawns
 pub fn evaluate_pawn_structure(game: &Game, game_phase: f32) -> f32 {
     let mut eval = 0.0;
 
@@ -344,7 +316,7 @@ pub fn evaluate_pawn_structure(game: &Game, game_phase: f32) -> f32 {
         }
     }
 
-    // Doubled pawns
+    // Evaluate doubled pawns
     let white_doubled = count_doubled_pawns(white_pawns);
     let black_doubled = count_doubled_pawns(black_pawns);
 

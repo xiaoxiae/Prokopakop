@@ -22,21 +22,15 @@ A moderately fast UCI chess engine written in Rust that **kops the Prokop**.
 - **[Alpha-Beta](https://www.chessprogramming.org/Alpha-Beta)** via **[Negamax](https://www.chessprogramming.org/Negamax)**
 - **[Iterative Deepening](https://www.chessprogramming.org/Iterative_Deepening)**
 - **[Move Ordering](https://www.chessprogramming.org/Move_Ordering)** - principal variation moves first, then [MVV-LVA](https://www.chessprogramming.org/MVV-LVA)
-- **[Quiescence Search](https://www.chessprogramming.org/Quiescence_Search)** with [Delta Pruning](https://www.chessprogramming.org/Delta_Pruning)
+- **[Quiescence Search](https://www.chessprogramming.org/Quiescence_Search)**
 - **[Transposition Table](https://www.chessprogramming.org/Transposition_Table)**
-- **[Killer Moves](https://www.chessprogramming.org/Killer_Heuristic)** (2 per ply)
 
 ### Evaluation
 
-- **[Material](https://www.chessprogramming.org/Material)**
-- **[Piece-Square Tables](https://www.chessprogramming.org/Piece-Square_Tables)**
-- **[Game Phase](https://www.chessprogramming.org/Game_Phases)** (based on material)
-- **[Pawn Structure](https://www.chessprogramming.org/Pawn_Structure)**:
-  - [Passed Pawns](https://www.chessprogramming.org/Passed_Pawn) with rank-based bonuses
-  - [Isolated Pawns](https://www.chessprogramming.org/Isolated_Pawn) penalties
-  - [Doubled Pawns](https://www.chessprogramming.org/Doubled_Pawn) penalties
-- **[Piece Mobility](https://www.chessprogramming.org/Mobility)**
-- **[Bishop Pair](https://www.chessprogramming.org/Bishop_Pair)** bonus
+- [Material](https://www.chessprogramming.org/Material)
+- [Piece-Square tables](https://www.chessprogramming.org/Piece-Square_Tables)
+- [Pawn Structure](https://www.chessprogramming.org/Pawn_Structure) (doubled pawns, passed pawns)
+- [Piece Mobility](https://www.chessprogramming.org/Mobility)
 
 
 <figure>
