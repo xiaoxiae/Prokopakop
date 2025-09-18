@@ -37,6 +37,7 @@ pub struct TranspositionTable {
     generation: u8,
     hits: AtomicU64,
     misses: AtomicU64,
+    filled_entries: AtomicU64,
 }
 
 impl TranspositionTable {
@@ -53,6 +54,7 @@ impl TranspositionTable {
             generation: 0,
             hits: AtomicU64::new(0),
             misses: AtomicU64::new(0),
+            filled_entries: AtomicU64::new(0),
         }
     }
 
@@ -89,6 +91,9 @@ impl TranspositionTable {
         let index = self.get_index(key);
         let existing = &self.entries[index];
 
+        // Check if we're filling an empty slot
+        let was_empty = existing.key == 0;
+
         // Replacement strategy:
         // Always replace if:
         // 1. Empty slot (key == 0)
@@ -108,6 +113,11 @@ impl TranspositionTable {
                 node_type,
                 age: self.generation,
             };
+
+            // Increment filled entries counter if we filled an empty slot
+            if was_empty {
+                self.filled_entries.fetch_add(1, Ordering::Relaxed);
+            }
         }
     }
 
@@ -118,5 +128,25 @@ impl TranspositionTable {
         self.generation = 0;
         self.hits.store(0, Ordering::Relaxed);
         self.misses.store(0, Ordering::Relaxed);
+        self.filled_entries.store(0, Ordering::Relaxed);
+    }
+
+    pub fn get_fullness_permille(&self) -> u64 {
+        let filled = self.filled_entries.load(Ordering::Relaxed);
+        let total = self.entries.len() as u64;
+
+        if total == 0 {
+            0
+        } else {
+            (filled * 1000) / total
+        }
+    }
+
+    pub fn get_hit_rate_percent(&self) -> u64 {
+        let hits = self.hits.load(Ordering::Relaxed);
+        let misses = self.misses.load(Ordering::Relaxed);
+        let total = hits + misses;
+
+        if total == 0 { 0 } else { (hits * 100) / total }
     }
 }
