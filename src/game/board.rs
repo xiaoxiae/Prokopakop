@@ -774,9 +774,6 @@ impl Game {
         }
     }
 
-    ///
-    /// Uses compile-time dispatch for both piece type and color.
-    ///
     fn get_piece_attack_bitboard_const<P: ConstPiece, C: ConstColor>(
         &self,
         square: BoardSquare,
@@ -1423,6 +1420,9 @@ impl Game {
         }
     }
 
+    ///
+    /// Returns true if the king of the given color is in check.
+    ///
     pub(crate) fn is_king_in_check(&self, color: Color) -> bool {
         match color {
             Color::White => self.is_square_attacked_const::<ConstBlack>(

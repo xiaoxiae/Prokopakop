@@ -20,7 +20,7 @@ pub struct GameController {
     pub opening_book: Option<OpeningBook>,
     position_history: PositionHistory,
     initialized: bool,
-    search_thread: Option<JoinHandle<()>>,
+    search_thread: Option<JoinHandle<BoardMove>>,
     stop_flag: Arc<AtomicBool>,
     tt: Arc<Mutex<TranspositionTable>>,
 }
@@ -480,21 +480,14 @@ impl GameController {
                         opening_book.as_ref(),
                     )
                 } else {
-                    let mut temp_tt = TranspositionTable::new(64);
-
-                    iterative_deepening(
-                        &mut game_clone,
-                        limits,
-                        stop_flag,
-                        &mut temp_tt,
-                        &mut position_history_clone,
-                        opening_book.as_ref(),
-                    )
+                    unreachable!();
                 }
             };
 
             // Output the best move in UCI format
             println!("bestmove {}", result.best_move.unparse());
+
+            result.best_move
         });
 
         self.search_thread = Some(handle);
@@ -504,10 +497,12 @@ impl GameController {
         // Signal the search to stop
         self.stop_flag.store(true, Ordering::Relaxed);
 
-        // Wait for the thread to finish
         if let Some(handle) = self.search_thread.take() {
-            // Give the thread a moment to finish gracefully
             let _ = handle.join();
+        }
+
+        if let Ok(mut tt) = self.tt.lock() {
+            tt.clear();
         }
     }
 

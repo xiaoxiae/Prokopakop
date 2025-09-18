@@ -9,6 +9,7 @@ use fxhash::FxHashMap;
 
 use crate::game::board::{BoardMove, BoardMoveExt, Game};
 use crate::game::evaluate::{CHECKMATE_SCORE, QUEEN_VALUE, get_piece_value};
+use crate::game::killer::KillerMoves;
 use crate::game::opening_book::OpeningBook;
 use crate::game::pieces::Piece;
 use crate::game::table::{NodeType, TranspositionTable};
@@ -42,48 +43,6 @@ impl SearchResult {
             best_move,
             evaluation,
             pv: new_pv,
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct KillerMoves {
-    // 2 killer moves per ply
-    killers: Vec<[BoardMove; 2]>,
-}
-
-impl KillerMoves {
-    pub fn new(max_ply: usize) -> Self {
-        Self {
-            killers: vec![[BoardMove::empty(); 2]; max_ply],
-        }
-    }
-
-    pub fn add_killer(&mut self, ply: usize, board_move: BoardMove) {
-        if ply >= self.killers.len() {
-            return;
-        }
-
-        if self.killers[ply][0] == board_move {
-            return;
-        }
-
-        self.killers[ply][1] = self.killers[ply][0];
-        self.killers[ply][0] = board_move;
-    }
-
-    pub fn get_killers(&self, ply: usize) -> [BoardMove; 2] {
-        if ply < self.killers.len() {
-            self.killers[ply].clone()
-        } else {
-            [BoardMove::default(); 2]
-        }
-    }
-
-    pub fn clear(&mut self) {
-        for killers in &mut self.killers {
-            killers[0] = BoardMove::empty();
-            killers[1] = BoardMove::empty();
         }
     }
 }
@@ -484,20 +443,18 @@ fn alpha_beta(
             &[]
         };
 
-        let mut search_depth = depth - 1;
-
+        // Late move reduction for sufficient depth
         if move_index >= 4
             && depth >= 3
             && !game.is_king_in_check(game.side)
             && !game.is_capture(*board_move)
             && !game.is_check(*board_move)
         {
-            search_depth = search_depth.div(2);
-
-            // Search with reduced depth
+            // Search with reduced depth first
+            let reduced_depth = depth.saturating_sub(2);
             let reduced_result = alpha_beta(
                 game,
-                search_depth,
+                reduced_depth,
                 ply + 1,
                 -beta,
                 -alpha,
@@ -510,19 +467,21 @@ fn alpha_beta(
                 killer_moves,
             );
 
-            // If the move looks good, re-search at full depth
-            if -reduced_result.evaluation > alpha {
-                search_depth = depth - 1;
-            } else {
+            let value = -reduced_result.evaluation;
+
+            // If the move fails low, skip it
+            if value <= alpha {
                 position_history.pop();
                 game.unmake_move();
                 continue;
             }
+
+            // Move looks promising, fall through to full-depth search
         }
 
         let result = alpha_beta(
             game,
-            search_depth,
+            depth - 1,
             ply + 1,
             -beta,
             -alpha,
