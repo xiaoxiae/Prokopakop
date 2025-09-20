@@ -11,19 +11,22 @@ import seaborn as sns
 from pathlib import Path
 
 COMMIT_NAMES = [
-    # these three were essentially random due to critical bugs in search/eval
-    # "9fec3a0",
-    # "8eeb84e",
-    # "b3f5395",
-
     "6aec863",  # functional alpha/beta + iterative deepening + material eval with position tables
-    "53a09e5",  # move ordering via pv + mvv-lva
+    # "53a09e5",  # move ordering via pv + mvv-lva
     "bbef3be",  # quiescence search
-    "35f6fb6",  # transposition table
-    "ff14c29",  # faster eval
+    # "35f6fb6",  # transposition table
+    # "ff14c29",  # faster eval
     "7ff40fc",  # threefold repetition detection
-    "ab3fdc8",  # passed / doubled pawns
+    # "ab3fdc8",  # passed / doubled pawns
     "6c4e7ee",  # piece mobility
+    # "a28d291",  # delta pruning for quiescence search
+    # "2c1a839",  # killer moves
+    "fed61d5",  # fast passed pawn eval
+    # "10c64e9",  # null move pruning
+    # "5047857",  # late move reduction
+    "93743a2",  # bishop pair + faster move generation
+    # "a56e0f7",  # better piece tables + isolated pawns
+    "1fb64eb",  # LMR bugfix
 ]
 
 MASTER_OPTIONS = {
@@ -70,12 +73,23 @@ def add_uci_options(cmd, options):
         cmd.extend([f"option.{option_name}={option_value}"])
 
 
-def build_fastchess_command(commit_names, add_master=False, duel=False):
+def build_fastchess_command(commit_names, add_master=False, last_n=None):
     """
     Build the fastchess command with multiple engines based on commit names.
+
+    Args:
+        commit_names: List of commit names to include
+        add_master: Whether to include the master binary
+        last_n: If specified, only include the last n commits (most recent)
     """
     # Base command
     cmd = ["./bin/fastchess/fastchess"]
+
+    # Determine which commits to use
+    commits_to_use = commit_names
+    if last_n is not None:
+        # Take the last n commits (most recent are at the end of the list)
+        commits_to_use = commit_names[-last_n:] if last_n <= len(commit_names) else commit_names
 
     # Add master binary if requested
     if add_master:
@@ -93,10 +107,7 @@ def build_fastchess_command(commit_names, add_master=False, duel=False):
         add_uci_options(cmd, MASTER_OPTIONS)
 
     # Add engine parameters for each commit
-    for i, commit_item in enumerate(commit_names):
-        if duel and (i < len(commit_names) - (2 if not add_master else 1)):
-            continue
-
+    for i, commit_item in enumerate(commits_to_use):
         commit_name, commit_options = get_commit_info(commit_item)
 
         binary_path = find_binary(commit_name)
@@ -104,33 +115,42 @@ def build_fastchess_command(commit_names, add_master=False, duel=False):
             print(f"Error: Could not find binary for commit {commit_name}")
             sys.exit(1)
 
+        # Calculate the original index for naming consistency
+        original_index = commit_names.index(commit_item) if commit_item in commit_names else i
         engine_name = commit_name
 
-        # Add -{i} so we can know which ones are the most recent
+        # Add -{original_index} so we can know which ones are the most recent
         cmd.extend([
             "-engine",
             f"cmd={binary_path}",
-            f"name={engine_name}-{i}"
+            f"name={engine_name}-{original_index}"
         ])
         # Add UCI options for this commit
         add_uci_options(cmd, commit_options)
 
     # Add common parameters
     cmd.extend([
-        "-each", "tc=5+0.1",
-        "-rounds", "100",
+        "-each", "tc=30+.1",
+        "-rounds", "300",
         "-concurrency", "32",
-        "-config", "outname=scripts/tournament_results.json"
+        "-config", "outname=scripts/tournament_results.json",
+        "-openings", "file=assets/book.pgn",
+        "format=pgn", "order=random",
     ])
 
     return cmd
 
 
-def run_fastchess(commit_names, add_master=False, duel=False):
+def run_fastchess(commit_names, add_master=False, last_n=None):
     """
     Run fastchess with the specified commit engines.
+
+    Args:
+        commit_names: List of commit names to include
+        add_master: Whether to include the master binary
+        last_n: If specified, only include the last n commits (most recent)
     """
-    command = build_fastchess_command(commit_names, add_master, duel)
+    command = build_fastchess_command(commit_names, add_master, last_n)
 
     print("Running fastchess with the following command:")
     print(" ".join(command))
@@ -237,13 +257,17 @@ def generate_heatmap(results_file="scripts/tournament_results.json", add_master=
     print(f"\nHeatmap saved to {output_file}")
 
 
-def print_engine_info(commit_names, add_master=False):
+def print_engine_info(commit_names, add_master=False, last_n=None):
     """Print information about engines and their options."""
-    total_engines = len(commit_names)
+    commits_to_use = commit_names
+    if last_n is not None:
+        commits_to_use = commit_names[-last_n:] if last_n <= len(commit_names) else commit_names
+
+    total_engines = len(commits_to_use)
     if add_master:
         total_engines += 1
 
-    print(f"Engines configured:")
+    print(f"Engines configured ({total_engines} total):")
 
     if add_master:
         options_str = ""
@@ -252,13 +276,14 @@ def print_engine_info(commit_names, add_master=False):
             options_str = f" (options: {', '.join(options_list)})"
         print(f"  master (target/release/prokopakop){options_str}")
 
-    for i, commit_item in enumerate(commit_names):
+    for i, commit_item in enumerate(commits_to_use):
         commit_name, commit_options = get_commit_info(commit_item)
+        original_index = commit_names.index(commit_item) if commit_item in commit_names else i
         options_str = ""
         if commit_options:
             options_list = [f"{k}={v}" for k, v in commit_options.items()]
             options_str = f" (options: {', '.join(options_list)})"
-        print(f"  {i}. {commit_name} (target/release/prokopakop-{commit_name}){options_str}")
+        print(f"  {original_index}. {commit_name} (target/release/prokopakop-{commit_name}){options_str}")
 
 
 def main():
@@ -270,8 +295,8 @@ def main():
                        help="Include the current prokopakop binary (master) in the tournament")
     parser.add_argument("--heatmap-only", action="store_true",
                        help="Only generate the heatmap from existing results without running tournament")
-    parser.add_argument("--duel", action="store_true",
-                       help="Run a duel between only the two most recent commits (and master if --add-master is specified)")
+    parser.add_argument("-n", "--last-n", type=int, metavar="N",
+                       help="Only include the last N commits (most recent) in the tournament")
     parser.add_argument("--results-file", default="scripts/tournament_results.json",
                        help="Path to the tournament results JSON file")
 
@@ -279,19 +304,33 @@ def main():
 
     commits_to_use = COMMIT_NAMES
 
+    # Validate last_n parameter
+    if args.last_n is not None:
+        if args.last_n <= 0:
+            print("Error: -n must be a positive integer")
+            sys.exit(1)
+        if args.last_n > len(COMMIT_NAMES):
+            print(f"Warning: Requested {args.last_n} commits, but only {len(COMMIT_NAMES)} available. Using all commits.")
+
     if args.heatmap_only:
         # Just generate the heatmap from existing results
         print("Generating heatmap from existing results...")
         generate_heatmap(args.results_file, args.add_master)
     else:
         # Run the tournament
-        tournament_type = "duel" if args.duel else "tournament"
+        if args.last_n is not None:
+            tournament_type = f"tournament (last {args.last_n} commits)"
+            if args.last_n == 2:
+                tournament_type = "duel (last 2 commits)"
+        else:
+            tournament_type = "full tournament"
+
         print(f"Setting up fastchess {tournament_type}:")
-        print_engine_info(commits_to_use, args.add_master)
+        print_engine_info(commits_to_use, args.add_master, args.last_n)
         print()
 
         # Run fastchess
-        exit_code = run_fastchess(commits_to_use, args.add_master, args.duel)
+        exit_code = run_fastchess(commits_to_use, args.add_master, args.last_n)
 
         if exit_code == 0:
             # Generate heatmap after successful tournament
