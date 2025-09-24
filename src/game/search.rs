@@ -351,17 +351,18 @@ fn alpha_beta(
     }
 
     let original_alpha = alpha;
+    let is_pv_node = beta - alpha > 1.0; // PV nodes have open window
 
     // Probe transposition table
     let mut tt_move = None;
     if let Some(tt_entry) = tt.probe(zobrist_key) {
         tt_move = Some(tt_entry.best_move);
 
-        // Use TT value if depth is sufficient
-        if tt_entry.depth >= depth as u8 {
+        // Use TT value if depth is sufficient (but not in PV nodes for exact scores)
+        if tt_entry.depth >= depth as u8 && (!is_pv_node || tt_entry.node_type != NodeType::Exact) {
             match tt_entry.node_type {
                 NodeType::Exact => {
-                    // Exact score - we can return immediately
+                    // Exact score - we can return immediately (only in non-PV nodes)
                     return SearchResult::with_pv(
                         tt_entry.best_move,
                         tt_entry.evaluation,
@@ -390,8 +391,12 @@ fn alpha_beta(
         return quiescence_search(game, ply, alpha, beta, stop_flag, stats, limits);
     }
 
-    // Null move pruning
-    if depth >= 3 && !game.is_king_in_check(game.side) && beta.abs() < CHECKMATE_SCORE - 1000.0 {
+    // Null move pruning (skip in PV nodes)
+    if !is_pv_node
+        && depth >= 3
+        && !game.is_king_in_check(game.side)
+        && beta.abs() < CHECKMATE_SCORE - 1000.0
+    {
         game.make_null_move();
 
         let r = 2 + (depth >= 6) as usize;
@@ -449,6 +454,7 @@ fn alpha_beta(
     let mut best_move = BoardMove::empty();
     let mut best_value = -f32::INFINITY;
     let mut best_pv = Vec::new();
+    let mut moves_searched = 0;
 
     for (move_index, board_move) in moves[0..move_count].iter().enumerate() {
         game.make_move(*board_move);
@@ -463,18 +469,14 @@ fn alpha_beta(
             &[]
         };
 
-        // Late move reduction for sufficient depth
-        if move_index >= 4
-            && depth >= 3
-            && !game.is_king_in_check(game.side)
-            && !game.is_capture(*board_move)
-            && !game.is_check(*board_move)
-        {
-            // Search with reduced depth first
-            let reduced_depth = depth.saturating_sub(2);
-            let reduced_result = alpha_beta(
+        let mut value;
+
+        // PVS: First move gets full window, others get null window first
+        if moves_searched == 0 {
+            // Search the first move with full window
+            let result = alpha_beta(
                 game,
-                reduced_depth,
+                depth - 1,
                 ply + 1,
                 -beta,
                 -alpha,
@@ -486,46 +488,103 @@ fn alpha_beta(
                 position_history,
                 killer_moves,
             );
+            value = -result.evaluation;
 
-            let value = -reduced_result.evaluation;
+            if value > best_value {
+                best_value = value;
+                best_move = *board_move;
+                best_pv = result.pv;
+            }
+        } else {
+            // Late move reduction for non-PV moves
+            if move_index >= 4
+                && depth >= 3
+                && !game.is_king_in_check(game.side)
+                && !game.is_capture(*board_move)
+                && !game.is_check(*board_move)
+            {
+                // Search with reduced depth first
+                let reduced_depth = depth.saturating_sub(2);
+                let reduced_result = alpha_beta(
+                    game,
+                    reduced_depth,
+                    ply + 1,
+                    -alpha - 1.0,
+                    -alpha,
+                    next_pv,
+                    stop_flag,
+                    stats,
+                    limits,
+                    tt,
+                    position_history,
+                    killer_moves,
+                );
 
-            // If the move fails low, skip it
-            if value <= alpha {
-                position_history.pop();
-                game.unmake_move();
-                continue;
+                value = -reduced_result.evaluation;
+
+                // If the move fails low, skip it
+                if value <= alpha {
+                    position_history.pop();
+                    game.unmake_move();
+                    moves_searched += 1;
+                    continue;
+                }
+                // Otherwise, we need to do a full depth search
             }
 
-            // Move looks promising, fall through to full-depth search
-        }
+            // PVS: Search with null window first
+            let null_window_result = alpha_beta(
+                game,
+                depth - 1,
+                ply + 1,
+                -alpha - 1.0,
+                -alpha,
+                next_pv,
+                stop_flag,
+                stats,
+                limits,
+                tt,
+                position_history,
+                killer_moves,
+            );
+            value = -null_window_result.evaluation;
 
-        let result = alpha_beta(
-            game,
-            depth - 1,
-            ply + 1,
-            -beta,
-            -alpha,
-            next_pv,
-            stop_flag,
-            stats,
-            limits,
-            tt,
-            position_history,
-            killer_moves,
-        );
+            // If the null window search fails high, re-search with full window
+            if value > alpha && value < beta {
+                let full_window_result = alpha_beta(
+                    game,
+                    depth - 1,
+                    ply + 1,
+                    -beta,
+                    -alpha,
+                    next_pv,
+                    stop_flag,
+                    stats,
+                    limits,
+                    tt,
+                    position_history,
+                    killer_moves,
+                );
+                value = -full_window_result.evaluation;
+
+                if value > best_value {
+                    best_value = value;
+                    best_move = *board_move;
+                    best_pv = full_window_result.pv;
+                }
+            } else if value > best_value {
+                // Even though it didn't require re-search, update best if it's better
+                best_value = value;
+                best_move = *board_move;
+                best_pv = null_window_result.pv;
+            }
+        }
 
         position_history.pop();
         game.unmake_move();
+        moves_searched += 1;
 
-        let value = -result.evaluation;
-
-        if value > best_value {
-            best_value = value;
-            best_move = *board_move;
-            best_pv = result.pv;
-        }
-
-        alpha = alpha.max(value);
+        alpha = alpha.max(best_value);
         if alpha >= beta {
             if !game.is_capture(*board_move) {
                 killer_moves.add_killer(ply, *board_move);
