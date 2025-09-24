@@ -26,7 +26,8 @@ COMMIT_NAMES = [
     # "5047857",  # late move reduction
     "93743a2",  # bishop pair + faster move generation
     # "a56e0f7",  # better piece tables + isolated pawns
-    "1fb64eb",  # LMR bugfix
+    # "1fb64eb",  # LMR bugfix
+    "7cfbb74",  # PV search
 ]
 
 MASTER_OPTIONS = {
@@ -130,12 +131,12 @@ def build_fastchess_command(commit_names, add_master=False, last_n=None):
 
     # Add common parameters
     cmd.extend([
-        "-each", "tc=30+.1",
-        "-rounds", "300",
+        "-each", "tc=5+.1",
+        "-rounds", "200",
         "-concurrency", "32",
         "-config", "outname=scripts/tournament_results.json",
-        "-openings", "file=assets/book.pgn",
-        "format=pgn", "order=random",
+        "-openings", "file=assets/book.edp",
+        "order=random",
     ])
 
     return cmd
