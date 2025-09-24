@@ -346,6 +346,10 @@ fn alpha_beta(
         }
     }
 
+    if game.is_fifty_move_rule() {
+        return SearchResult::leaf(0.0);
+    }
+
     let original_alpha = alpha;
 
     // Probe transposition table

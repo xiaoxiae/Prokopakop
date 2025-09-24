@@ -267,11 +267,12 @@ pub struct Game {
     all_pieces: Bitboard,
 
     halfmoves: usize,
-    halfmoves_since_capture: usize,
+    halfmoves_since_capture: u8,
 
     // store the move, which piece was there, and en-passant + castling flags
     // the flags can NOT be calculated as an arbitrary position can have those
-    pub history: Vec<(BoardMove, Option<ColoredPiece>, u8, Bitboard)>,
+    // (move, captured_piece, castling_flags, en_passant_bitmap, halfmoves_since_capture)
+    pub history: Vec<(BoardMove, Option<ColoredPiece>, u8, Bitboard, u8)>,
 
     // store the zobrist key for the current position (computed iteratively)
     pub zobrist_key: u64,
@@ -354,7 +355,7 @@ impl Game {
             _ => panic!("FEN parsing failure: incorrect En Passant target square"),
         }
 
-        game.halfmoves_since_capture = parts.next().unwrap_or("0").parse::<usize>().unwrap();
+        game.halfmoves_since_capture = parts.next().unwrap_or("0").parse::<u8>().unwrap();
 
         // Fullmoves start at 1 and are incremented for white play
         let fullmoves = parts.next().unwrap_or("1").parse::<usize>().unwrap();
@@ -547,8 +548,15 @@ impl Game {
     /// Undo a move.
     ///
     pub(crate) fn unmake_move(&mut self) {
-        let (board_move, captured_piece, castling_flags, en_passant_bitmap) =
-            self.history.pop().unwrap();
+        let (
+            board_move,
+            captured_piece,
+            castling_flags,
+            en_passant_bitmap,
+            halfmoves_since_capture,
+        ) = self.history.pop().unwrap();
+
+        self.halfmoves_since_capture = halfmoves_since_capture;
 
         let (piece, color) = self.pieces[board_move.get_to() as usize].expect(
             "No piece at target square when unmaking a move. This should never ever happen.",
@@ -638,28 +646,41 @@ impl Game {
             None,
             self.castling_flags,
             self.en_passant_bitmap,
+            self.halfmoves_since_capture,
         ));
 
         self.update_en_passant_bitmap(0);
+        self.halfmoves_since_capture = self.halfmoves_since_capture.saturating_add(1);
         self.update_turn(0);
     }
 
     pub(crate) fn unmake_null_move(&mut self) {
-        let (_, _, _, en_passant_bitmap) = self.history.pop().unwrap();
+        let (_, _, _, en_passant_bitmap, halfmoves_since_capture) = self.history.pop().unwrap();
 
         self.update_en_passant_bitmap(en_passant_bitmap);
+        self.halfmoves_since_capture = halfmoves_since_capture;
         self.update_turn(0);
     }
 
     fn make_move_const<P: ConstPiece, C: ConstColor>(&mut self, board_move: BoardMove) {
         let captured_piece = self.pieces[board_move.get_to() as usize];
 
+        let prev_halfmoves_since_capture = self.halfmoves_since_capture;
+
         self.history.push((
             board_move,
             captured_piece,
             self.castling_flags,
             self.en_passant_bitmap,
+            prev_halfmoves_since_capture,
         ));
+
+        // update halfmoves_since_capture by either capture or pawn move
+        if captured_piece.is_some() || P::PIECE == Piece::Pawn {
+            self.halfmoves_since_capture = 0;
+        } else {
+            self.halfmoves_since_capture = self.halfmoves_since_capture.saturating_add(1);
+        }
 
         // remove captured piece
         if let Some((captured, captured_color)) = captured_piece {
@@ -1468,6 +1489,10 @@ impl Game {
         let bistop_pair_value = evaluate_bishop_pair(self, game_phase);
 
         material_value + positional_value + mobility_value + bistop_pair_value
+    }
+
+    pub fn is_fifty_move_rule(&self) -> bool {
+        self.halfmoves_since_capture >= 100
     }
 
     /// Play through a sequence of moves and record the zobrist hash after each move
