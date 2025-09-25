@@ -99,9 +99,9 @@ fn main() {
                 // Ignore commands until UCI initialization
                 continue;
             }
-            GUICommand::FenPosition(fen) => controller.new_game_from_fen(fen.as_str()),
+            GUICommand::FenPosition(fen) => controller.set_board_from_fen(fen.as_str()),
             GUICommand::MovePosition(moves) => {
-                controller.new_game();
+                controller.reset_board();
 
                 if let Some(moves_strings) = moves {
                     for notation in moves_strings {
@@ -115,6 +115,8 @@ fn main() {
                             }
                         }
                     }
+                } else {
+                    controller.reset_transposition_table();
                 }
             }
             GUICommand::SetOption(name, value) => {

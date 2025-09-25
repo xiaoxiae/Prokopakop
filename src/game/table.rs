@@ -1,21 +1,24 @@
 use crate::game::board::BoardMove;
+use crate::game::pieces::Color;
 use std::sync::atomic::{AtomicU64, Ordering};
+
+const BUCKET_SIZE: usize = 4; // Number of entries per bucket
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum NodeType {
-    Exact,      // PV node - exact evaluation
-    LowerBound, // Cut node - beta cutoff occurred (evaluation >= actual)
-    UpperBound, // All node - no move improved alpha (evaluation <= actual)
+    Exact,
+    LowerBound,
+    UpperBound,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct TTEntry {
-    pub key: u64,             // Zobrist key for verification
-    pub depth: u8,            // Search depth
-    pub evaluation: f32,      // Stored evaluation
-    pub best_move: BoardMove, // Best move found
-    pub node_type: NodeType,  // Type of node
-    pub age: u8,              // Search generation for replacement strategy
+    pub key: u64,
+    pub depth: u8,
+    pub evaluation: f32,
+    pub best_move: BoardMove,
+    pub node_type: NodeType,
+    pub age: u8,
 }
 
 impl Default for TTEntry {
@@ -31,53 +34,92 @@ impl Default for TTEntry {
     }
 }
 
+impl TTEntry {
+    fn replacement_score(&self, current_generation: u8) -> i32 {
+        if self.key == 0 {
+            return -1000;
+        }
+
+        // Adjust weights based on testing
+        let depth_score = self.depth as i32 * 8; // Reduced from 10
+
+        // More gradual age penalty
+        let age_diff = current_generation.wrapping_sub(self.age);
+        let age_penalty = (age_diff as i32).min(15) * 3;
+
+        // Differentiate node types more
+        let node_type_bonus = match self.node_type {
+            NodeType::Exact => 25,     // PV nodes most valuable
+            NodeType::LowerBound => 5, // Cut nodes somewhat valuable
+            NodeType::UpperBound => 0, // All nodes least valuable
+        };
+
+        depth_score + node_type_bonus - age_penalty
+    }
+}
+
 pub struct TranspositionTable {
-    entries: Vec<TTEntry>,
-    size_mask: usize,
+    buckets: Vec<[TTEntry; BUCKET_SIZE]>,
+    bucket_count: usize,
     generation: u8,
     hits: AtomicU64,
     misses: AtomicU64,
     filled_entries: AtomicU64,
+    overwrites: AtomicU64,
 }
 
 impl TranspositionTable {
     pub fn new(size_mb: usize) -> Self {
-        let entry_size = std::mem::size_of::<TTEntry>();
-        let total_entries = (size_mb * 1024 * 1024) / entry_size;
+        let entry_size = std::mem::size_of::<TTEntry>() * BUCKET_SIZE;
+        let total_buckets = (size_mb * 1024 * 1024) / entry_size;
 
-        let size = total_entries.next_power_of_two() / 2;
-        let size_mask = size - 1;
+        let bucket_count = total_buckets.min(total_buckets.next_power_of_two());
 
         Self {
-            entries: vec![TTEntry::default(); size],
-            size_mask,
+            buckets: vec![[TTEntry::default(); BUCKET_SIZE]; bucket_count],
+            bucket_count,
             generation: 0,
             hits: AtomicU64::new(0),
             misses: AtomicU64::new(0),
             filled_entries: AtomicU64::new(0),
+            overwrites: AtomicU64::new(0),
         }
     }
 
     pub fn new_search(&mut self) {
         self.generation = self.generation.wrapping_add(1);
+
+        // Prune very old entries periodically
+        if self.generation % 16 == 0 {
+            self.prune_old_entries();
+        }
     }
 
-    fn get_index(&self, key: u64) -> usize {
-        (key as usize) & self.size_mask
+    fn get_bucket_index(&self, key: u64) -> usize {
+        (key as usize) % self.bucket_count
     }
 
-    pub fn probe(&self, key: u64) -> Option<TTEntry> {
-        let index = self.get_index(key);
-        let entry = &self.entries[index];
+    pub fn probe(&self, key: u64, side: Color) -> Option<TTEntry> {
+        let bucket_idx = self.get_bucket_index(key);
+        let bucket = &self.buckets[bucket_idx];
 
-        // Check if this is a valid entry for our position
-        if entry.key != key {
-            self.misses.fetch_add(1, Ordering::Relaxed);
-            return None;
+        // Search through bucket for matching key
+        for entry in bucket.iter() {
+            if entry.key == key {
+                self.hits.fetch_add(1, Ordering::Relaxed);
+
+                // Convert evaluation from white's perspective to current side's perspective
+                let mut adjusted_entry = *entry;
+                if side == Color::Black {
+                    adjusted_entry.evaluation = -adjusted_entry.evaluation;
+                }
+
+                return Some(adjusted_entry);
+            }
         }
 
-        self.hits.fetch_add(1, Ordering::Relaxed);
-        Some(entry.clone())
+        self.misses.fetch_add(1, Ordering::Relaxed);
+        None
     }
 
     pub fn store(
@@ -87,58 +129,102 @@ impl TranspositionTable {
         evaluation: f32,
         best_move: BoardMove,
         node_type: NodeType,
+        side: Color,
     ) {
-        let index = self.get_index(key);
-        let existing = &self.entries[index];
+        let bucket_idx = self.get_bucket_index(key);
+        let bucket = &mut self.buckets[bucket_idx];
 
-        // Check if we're filling an empty slot
-        let was_empty = existing.key == 0;
+        // Convert evaluation to white's perspective for storage
+        let white_eval = if side == Color::Black {
+            -evaluation
+        } else {
+            evaluation
+        };
 
-        // Replacement strategy:
-        // Always replace if:
-        // 1. Empty slot (key == 0)
-        // 2. Same position (always update with latest search)
-        // 3. Old entry from previous search (different generation) AND new search is at least as deep
+        let new_entry = TTEntry {
+            key,
+            depth,
+            evaluation: white_eval,
+            best_move,
+            node_type,
+            age: self.generation,
+        };
 
-        let should_replace = existing.key == 0
-            || existing.key == key
-            || (existing.age != self.generation && depth >= existing.depth);
+        // First pass: look for same position or empty slot
+        for i in 0..BUCKET_SIZE {
+            if bucket[i].key == key || bucket[i].key == 0 {
+                let was_empty = bucket[i].key == 0;
+                bucket[i] = new_entry;
 
-        if should_replace {
-            self.entries[index] = TTEntry {
-                key,
-                depth,
-                evaluation,
-                best_move,
-                node_type,
-                age: self.generation,
-            };
-
-            // Increment filled entries counter if we filled an empty slot
-            if was_empty {
-                self.filled_entries.fetch_add(1, Ordering::Relaxed);
+                if was_empty {
+                    self.filled_entries.fetch_add(1, Ordering::Relaxed);
+                }
+                return;
             }
+        }
+
+        // Second pass: find entry to replace based on replacement score
+        let mut worst_idx = 0;
+        let mut worst_score = i32::MAX;
+
+        for i in 0..BUCKET_SIZE {
+            let score = bucket[i].replacement_score(self.generation);
+            if score < worst_score {
+                worst_score = score;
+                worst_idx = i;
+            }
+        }
+
+        // Only replace if new entry is better than worst existing
+        let new_score = new_entry.replacement_score(self.generation);
+        if new_score > worst_score {
+            bucket[worst_idx] = new_entry;
+            self.overwrites.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    pub fn prune_old_entries(&mut self) {
+        const MAX_AGE_DIFF: u8 = 32;
+        let mut pruned = 0u64;
+
+        for bucket in self.buckets.iter_mut() {
+            for entry in bucket.iter_mut() {
+                if entry.key != 0 {
+                    let age_diff = self.generation.wrapping_sub(entry.age);
+                    if age_diff > MAX_AGE_DIFF {
+                        *entry = TTEntry::default();
+                        pruned += 1;
+                    }
+                }
+            }
+        }
+
+        if pruned > 0 {
+            self.filled_entries.fetch_sub(pruned, Ordering::Relaxed);
+            println!("info string Pruned {} old TT entries", pruned);
         }
     }
 
     pub fn clear(&mut self) {
-        for entry in &mut self.entries {
-            *entry = TTEntry::default();
+        for bucket in self.buckets.iter_mut() {
+            *bucket = [TTEntry::default(); BUCKET_SIZE];
         }
+
         self.generation = 0;
         self.hits.store(0, Ordering::Relaxed);
         self.misses.store(0, Ordering::Relaxed);
         self.filled_entries.store(0, Ordering::Relaxed);
+        self.overwrites.store(0, Ordering::Relaxed);
     }
 
     pub fn get_fullness_permille(&self) -> u64 {
         let filled = self.filled_entries.load(Ordering::Relaxed);
-        let total = self.entries.len() as u64;
+        let total_slots = (self.bucket_count * BUCKET_SIZE) as u64;
 
-        if total == 0 {
+        if total_slots == 0 {
             0
         } else {
-            (filled * 1000) / total
+            (filled * 1000) / total_slots
         }
     }
 

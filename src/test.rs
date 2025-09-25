@@ -10,7 +10,7 @@ mod tests {
     fn test_null_move() {
         let mut controller = GameController::new();
 
-        controller.new_game_from_fen(
+        controller.set_board_from_fen(
             "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
         );
 
@@ -238,7 +238,7 @@ mod tests {
             "rnbq1k1r/pp1Pbppp/2p5/8/2B5/8/PPP1NnPP/RNBQK2R w KQ - 1 8",
             "r4rk1/1pp1qppp/p1np1n2/2b1p1B1/2B1P1b1/P1NP1N2/1PP1QPPP/R4RK1 w - - 0 10",
         ] {
-            controller.new_game_from_fen(position);
+            controller.set_board_from_fen(position);
 
             // Get the FEN back from the game
             let generated_fen = controller.game.get_fen();
@@ -299,7 +299,7 @@ mod tests {
 
         // Test with a complete standard starting position
         let starting_fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
-        controller.new_game_from_fen(starting_fen);
+        controller.set_board_from_fen(starting_fen);
         let generated = controller.game.get_fen();
         assert_eq!(starting_fen, generated, "Starting position FEN mismatch");
     }
@@ -361,7 +361,7 @@ mod tests {
             .par_iter()
             .map(|(fen, depth, expected_count)| {
                 let mut controller = GameController::new();
-                controller.new_game_from_fen(fen);
+                controller.set_board_from_fen(fen);
 
                 let moves = controller.perft(*depth);
 
