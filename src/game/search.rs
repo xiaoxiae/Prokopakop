@@ -11,7 +11,7 @@ use crate::game::board::{BoardMove, BoardMoveExt, Game};
 use crate::game::evaluate::{CHECKMATE_SCORE, QUEEN_VALUE, get_piece_value};
 use crate::game::killer::KillerMoves;
 use crate::game::opening_book::OpeningBook;
-use crate::game::pieces::Piece;
+use crate::game::pieces::{Color, Piece};
 use crate::game::table::{NodeType, TranspositionTable};
 
 #[derive(Debug, Clone)]
@@ -160,12 +160,16 @@ impl PositionHistory {
 /// Formats and prints UCI info string
 pub fn print_uci_info(
     depth: usize,
-    score: f32,
+    mut score: f32,
     pv: &[BoardMove],
     stats: &SearchStats,
     tt: &mut TranspositionTable,
+    side: Color,
 ) {
     let mut info = format!("info depth {}", depth);
+
+    // Convert score to white's perspective for UCI output
+    score = score * side;
 
     // Check if this is a checkmate score
     if score.abs() > CHECKMATE_SCORE - 1000.0 {
@@ -237,7 +241,7 @@ pub fn iterative_deepening(
 
             // Use a neutral evaluation since opening book moves don't have evaluations
             let pv = vec![best_move];
-            print_uci_info(1, 0.0, &pv, &stats, tt);
+            print_uci_info(1, 0.0, &pv, &stats, tt, game.side);
 
             return SearchResult {
                 best_move,
@@ -253,7 +257,7 @@ pub fn iterative_deepening(
     if count == 1 {
         let best_move = moves[0];
         let pv = vec![best_move];
-        print_uci_info(1, 0.0, &pv, &stats, tt);
+        print_uci_info(1, 0.0, &pv, &stats, tt, game.side);
 
         return SearchResult {
             best_move,
@@ -303,7 +307,7 @@ pub fn iterative_deepening(
         };
 
         if !stats.should_stop(&limits, &stop_flag) {
-            print_uci_info(depth, result.evaluation, &result.pv, &stats, tt);
+            print_uci_info(depth, result.evaluation, &result.pv, &stats, tt, game.side);
             best_result = result.clone();
             previous_pv = result.pv;
 
@@ -827,7 +831,6 @@ fn quiescence_search(
         return SearchResult::leaf(stand_pat);
     }
 
-    // Order captures by MVV-LVA
     capture_moves.sort_unstable_by(|a, b| {
         let score_a = mvv_lva_score(game, a);
         let score_b = mvv_lva_score(game, b);
