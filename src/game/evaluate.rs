@@ -294,7 +294,7 @@ pub fn evaluate_pawn_structure(game: &Game, game_phase: f32) -> f32 {
 
     for square in white_pawns.iter_positions() {
         if is_passed_pawn(square, Color::White, black_pawns) {
-            let rank = (square / 8) as usize;
+            let rank = square.get_y() as usize;
             let bonus = PASSED_PAWN_BONUS[rank] * (1.0 + game_phase * PASSED_PAWN_LATE_MULTIPLIER);
             eval += bonus;
         }
@@ -306,7 +306,7 @@ pub fn evaluate_pawn_structure(game: &Game, game_phase: f32) -> f32 {
 
     for square in black_pawns.iter_positions() {
         if is_passed_pawn(square, Color::Black, white_pawns) {
-            let rank = 7 - (square / 8) as usize;
+            let rank = 7 - square.get_y() as usize;
             let bonus = PASSED_PAWN_BONUS[rank] * (1.0 + game_phase * PASSED_PAWN_LATE_MULTIPLIER);
             eval -= bonus;
         }

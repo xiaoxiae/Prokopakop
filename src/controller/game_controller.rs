@@ -262,7 +262,7 @@ impl GameController {
                 "true" => self.perft_hash = true,
                 "false" => self.perft_hash = false,
                 _ => eprintln!(
-                    "Invalid value for Hash option: {}. Expected 'true' or 'false'",
+                    "Invalid value for PerftHash option: {}. Expected 'true' or 'false'",
                     value
                 ),
             },
