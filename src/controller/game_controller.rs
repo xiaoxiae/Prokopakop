@@ -198,7 +198,7 @@ impl GameController {
         Self {
             game: Game::new(None),
             perft_hash: true,
-            hash_table_size: 64,
+            hash_table_size: 128,
             move_overhead: 10,
             threads: 1,
             opening_book: None,
@@ -206,7 +206,7 @@ impl GameController {
             initialized: false,
             search_thread: None,
             stop_flag: Arc::new(AtomicBool::new(false)),
-            tt: Arc::new(Mutex::new(TranspositionTable::new(64))),
+            tt: Arc::new(Mutex::new(TranspositionTable::new(128))),
         }
     }
 
@@ -227,21 +227,19 @@ impl GameController {
         }
     }
 
-    pub fn new_game(&mut self) {
+    pub fn reset_board(&mut self) {
         self.game = Game::new(None);
         self.position_history = PositionHistory::new();
         self.position_history.push(self.game.zobrist_key);
-
-        if let Ok(mut tt) = self.tt.lock() {
-            tt.clear();
-        }
     }
 
-    pub fn new_game_from_fen(&mut self, fen: &str) {
+    pub fn set_board_from_fen(&mut self, fen: &str) {
         self.game = Game::new(Some(fen));
         self.position_history = PositionHistory::new();
         self.position_history.push(self.game.zobrist_key);
+    }
 
+    pub fn reset_transposition_table(&mut self) {
         if let Ok(mut tt) = self.tt.lock() {
             tt.clear();
         }
@@ -249,7 +247,9 @@ impl GameController {
 
     pub fn initialize(&mut self) {
         self.initialized = true;
-        self.new_game();
+
+        self.reset_board();
+        self.reset_transposition_table();
     }
 
     pub fn is_initialized(&self) -> bool {
@@ -500,14 +500,10 @@ impl GameController {
         if let Some(handle) = self.search_thread.take() {
             let _ = handle.join();
         }
-
-        if let Ok(mut tt) = self.tt.lock() {
-            tt.clear();
-        }
     }
 
     pub fn print_uci_options(&self) {
-        println!("option name Hash type spin default 64 min 1 max 33554432");
+        println!("option name Hash type spin default 128 min 1 max 33554432");
         println!("option name Move Overhead type spin default 10 min 0 max 5000");
         println!("option name Threads type spin default 1 min 1 max 1024");
         println!("option name PerftHash type check default true");
