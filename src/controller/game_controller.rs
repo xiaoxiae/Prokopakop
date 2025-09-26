@@ -231,12 +231,16 @@ impl GameController {
         self.game = Game::new(None);
         self.position_history = PositionHistory::new();
         self.position_history.push(self.game.zobrist_key);
+
+        self.reset_transposition_table();
     }
 
     pub fn set_board_from_fen(&mut self, fen: &str) {
         self.game = Game::new(Some(fen));
         self.position_history = PositionHistory::new();
         self.position_history.push(self.game.zobrist_key);
+
+        self.reset_transposition_table();
     }
 
     pub fn reset_transposition_table(&mut self) {
@@ -249,7 +253,6 @@ impl GameController {
         self.initialized = true;
 
         self.reset_board();
-        self.reset_transposition_table();
     }
 
     pub fn is_initialized(&self) -> bool {
