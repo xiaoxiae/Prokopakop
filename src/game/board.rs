@@ -588,8 +588,8 @@ impl Game {
         self.set_piece(
             board_move.get_from(),
             match board_move.get_promotion() {
-                None => (P::PIECE, C::COLOR),
                 Some(_) => (Piece::Pawn, C::COLOR),
+                _ => (P::PIECE, C::COLOR),
             },
         );
 

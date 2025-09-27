@@ -512,8 +512,8 @@ fn alpha_beta(
             // Late move reduction for non-PV moves
             if move_index >= 4
                 && depth >= 3
-                && !game.is_king_in_check(game.side)
                 && !game.is_capture(*board_move)
+                && !game.is_king_in_check(game.side)
                 && !game.is_check(*board_move)
             {
                 // Search with reduced depth first
@@ -879,7 +879,6 @@ fn quiescence_search(
 
         let result = quiescence_search(game, ply + 1, -beta, -alpha, stop_flag, stats, limits);
 
-        // Remove position from history
         game.unmake_move();
 
         let value = -result.evaluation;
