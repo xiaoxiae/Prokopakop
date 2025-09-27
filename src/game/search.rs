@@ -9,6 +9,7 @@ use fxhash::FxHashMap;
 
 use crate::game::board::{BoardMove, BoardMoveExt, Game};
 use crate::game::evaluate::{CHECKMATE_SCORE, QUEEN_VALUE, get_piece_value};
+use crate::game::history::HistoryTable;
 use crate::game::killer::KillerMoves;
 use crate::game::opening_book::OpeningBook;
 use crate::game::pieces::{Color, Piece};
@@ -271,6 +272,7 @@ pub fn iterative_deepening(
 
     // Initialize killer moves table
     let mut killer_moves = KillerMoves::new(256);
+    let mut history_table = HistoryTable::new();
 
     for depth in 1..=limits.max_depth.unwrap_or(256) {
         stats.current_depth = depth as u64;
@@ -288,6 +290,7 @@ pub fn iterative_deepening(
                 tt,
                 position_history,
                 &mut killer_moves,
+                &mut history_table,
             )
         } else {
             alpha_beta(
@@ -303,6 +306,7 @@ pub fn iterative_deepening(
                 tt,
                 position_history,
                 &mut killer_moves,
+                &mut history_table,
             )
         };
 
@@ -336,6 +340,7 @@ fn alpha_beta(
     tt: &mut TranspositionTable,
     position_history: &mut PositionHistory,
     killer_moves: &mut KillerMoves,
+    history_table: &mut HistoryTable,
 ) -> SearchResult {
     stats.increment_nodes();
     if stats.should_stop(&limits, &stop_flag) {
@@ -417,6 +422,7 @@ fn alpha_beta(
             tt,
             position_history,
             killer_moves,
+            history_table,
         );
 
         game.unmake_null_move();
@@ -454,6 +460,7 @@ fn alpha_beta(
         tt_move,
         pv_move,
         killer_moves.get_killers(ply),
+        history_table,
     );
 
     let mut best_move = BoardMove::empty();
@@ -492,6 +499,7 @@ fn alpha_beta(
                 tt,
                 position_history,
                 killer_moves,
+                history_table,
             );
             value = -result.evaluation;
 
@@ -523,12 +531,16 @@ fn alpha_beta(
                     tt,
                     position_history,
                     killer_moves,
+                    history_table,
                 );
 
                 value = -reduced_result.evaluation;
 
                 // If the move fails low, skip it
                 if value <= alpha {
+                    // Penalize this move in history since it failed low
+                    history_table.add_history_penalty(*board_move, depth);
+
                     position_history.pop();
                     game.unmake_move();
                     moves_searched += 1;
@@ -551,6 +563,7 @@ fn alpha_beta(
                 tt,
                 position_history,
                 killer_moves,
+                history_table,
             );
             value = -null_window_result.evaluation;
 
@@ -569,6 +582,7 @@ fn alpha_beta(
                     tt,
                     position_history,
                     killer_moves,
+                    history_table,
                 );
                 value = -full_window_result.evaluation;
 
@@ -591,10 +605,17 @@ fn alpha_beta(
 
         alpha = alpha.max(best_value);
         if alpha >= beta {
+            // This move caused a beta cutoff - it's a good move!
             if !game.is_capture(*board_move) {
                 killer_moves.add_killer(ply, *board_move);
+                history_table.add_history(*board_move, depth);
             }
             break;
+        } else if value <= original_alpha {
+            // This move didn't improve alpha - penalize it
+            if !game.is_capture(*board_move) {
+                history_table.add_history_penalty(*board_move, depth);
+            }
         }
     }
 
@@ -654,6 +675,7 @@ fn aspiration_search(
     tt: &mut TranspositionTable,
     position_history: &mut PositionHistory,
     killer_moves: &mut KillerMoves,
+    history_table: &mut HistoryTable,
 ) -> SearchResult {
     // Don't use aspiration windows for checkmate scores
     if previous_score.abs() > CHECKMATE_SCORE - 1000.0 {
@@ -670,6 +692,7 @@ fn aspiration_search(
             tt,
             position_history,
             killer_moves,
+            history_table,
         );
     }
 
@@ -692,6 +715,7 @@ fn aspiration_search(
             tt,
             position_history,
             killer_moves,
+            history_table,
         );
 
         // If search was interrupted and returned empty move, fall back to previous result
@@ -750,6 +774,7 @@ fn aspiration_search(
                 tt,
                 position_history,
                 killer_moves,
+                history_table,
             );
 
             // If even the fallback search returns empty move, use previous move
@@ -885,6 +910,7 @@ fn order_moves_with_heuristics(
     tt_move: Option<BoardMove>,
     pv_move: Option<BoardMove>,
     killer_moves: [BoardMove; 2],
+    history_table: &HistoryTable,
 ) {
     moves.sort_unstable_by_key(|&mv| {
         if Some(mv) == pv_move {
@@ -898,7 +924,7 @@ fn order_moves_with_heuristics(
         } else if mv == killer_moves[1] {
             -600_000
         } else {
-            0
+            -history_table.get_history_score(&mv)
         }
     });
 }
