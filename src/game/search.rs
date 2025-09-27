@@ -432,26 +432,8 @@ fn alpha_beta(
         }
     }
 
-    let (move_count, mut moves) = game.get_moves();
-
-    if move_count == 0 {
-        let eval = if game.is_king_in_check(game.side) {
-            -CHECKMATE_SCORE + ply as f32
-        } else {
-            0.0
-        };
-
-        tt.store(
-            zobrist_key,
-            depth as u8,
-            eval,
-            BoardMove::empty(),
-            NodeType::Exact,
-            game.side,
-        );
-
-        return SearchResult::leaf(eval);
-    }
+    // Use pseudo-legal move generation
+    let (move_count, mut moves) = game.get_pseudo_legal_moves();
 
     let pv_move = previous_pv.get(0).copied();
     order_moves_with_heuristics(
@@ -467,9 +449,17 @@ fn alpha_beta(
     let mut best_value = -f32::INFINITY;
     let mut best_pv = Vec::new();
     let mut moves_searched = 0;
+    let mut legal_moves_found = 0;
 
     for (move_index, board_move) in moves[0..move_count].iter().enumerate() {
         game.make_move(*board_move);
+
+        if game.is_king_in_check(!game.side) {
+            game.unmake_move();
+            continue;
+        }
+
+        legal_moves_found += 1;
 
         let new_zobrist = game.zobrist_key;
         position_history.push(new_zobrist);
@@ -617,6 +607,26 @@ fn alpha_beta(
                 history_table.add_history_penalty(*board_move, depth);
             }
         }
+    }
+
+    // Check for checkmate or stalemate
+    if legal_moves_found == 0 {
+        let eval = if game.is_king_in_check(game.side) {
+            -CHECKMATE_SCORE + ply as f32
+        } else {
+            0.0
+        };
+
+        tt.store(
+            zobrist_key,
+            depth as u8,
+            eval,
+            BoardMove::empty(),
+            NodeType::Exact,
+            game.side,
+        );
+
+        return SearchResult::leaf(eval);
     }
 
     let node_type = if best_value <= original_alpha {
@@ -826,45 +836,52 @@ fn quiescence_search(
         alpha = stand_pat;
     }
 
-    // Get all moves
-    let (move_count, moves) = game.get_moves();
-
-    // If no moves available, check for checkmate or stalemate
-    if move_count == 0 {
-        if game.is_king_in_check(game.side) {
-            return SearchResult::leaf(-CHECKMATE_SCORE + ply as f32);
-        } else {
-            return SearchResult::leaf(0.0);
-        }
-    }
+    // Get pseudo-legal moves
+    let (move_count, moves) = game.get_pseudo_legal_moves();
 
     // Filter to only captures (and optionally checks) with delta pruning
-    let mut capture_moves = Vec::new();
+    let mut capture_or_check_moves = Vec::new();
+    let mut has_legal_move = false;
+
     for i in 0..move_count {
         let board_move = moves[i];
 
-        if game.is_capture(board_move) || game.is_check(board_move) {
-            // Apply delta pruning for captures only (not for checks)
-            if game.is_capture(board_move) {
-                let max_gain = calculate_delta_margin(game, &board_move);
+        game.make_move(board_move);
 
-                // Delta pruning: if even the best possible outcome can't improve alpha,
-                // skip this move; margin is about a pawn
-                if stand_pat + max_gain + get_piece_value(Piece::Pawn) / 2.0 < alpha {
-                    continue;
-                }
+        // Illegal move -- skip
+        if game.is_king_in_check(!game.side) {
+            game.unmake_move();
+            continue;
+        }
+
+        has_legal_move = true;
+
+        let is_check = game.is_king_in_check(game.side);
+        game.unmake_move();
+
+        // Apply delta pruning for captures only (not for checks)
+        if game.is_capture(board_move) {
+            let max_gain = calculate_delta_margin(game, &board_move);
+
+            // Delta pruning: if even the best possible outcome can't improve alpha,
+            // skip this move; margin is about a pawn
+            if stand_pat + max_gain + get_piece_value(Piece::Pawn) / 2.0 < alpha {
+                continue;
             }
 
-            capture_moves.push(board_move);
+            capture_or_check_moves.push(board_move);
+        } else if is_check {
+            // Add checks either way though
+            capture_or_check_moves.push(board_move);
         }
     }
 
     // If no captures/checks available, return the standing pat evaluation
-    if capture_moves.is_empty() {
+    if capture_or_check_moves.is_empty() {
         return SearchResult::leaf(stand_pat);
     }
 
-    capture_moves.sort_unstable_by(|a, b| {
+    capture_or_check_moves.sort_unstable_by(|a, b| {
         let score_a = mvv_lva_score(game, a);
         let score_b = mvv_lva_score(game, b);
         score_b.cmp(&score_a)
@@ -874,7 +891,7 @@ fn quiescence_search(
     let mut best_move = BoardMove::empty();
     let mut best_pv = Vec::new();
 
-    for board_move in capture_moves.iter() {
+    for board_move in capture_or_check_moves.iter() {
         game.make_move(*board_move);
 
         let result = quiescence_search(game, ply + 1, -beta, -alpha, stop_flag, stats, limits);
@@ -893,6 +910,16 @@ fn quiescence_search(
         if alpha >= beta {
             break; // Beta cutoff
         }
+    }
+
+    if !has_legal_move {
+        let eval = if game.is_king_in_check(game.side) {
+            -CHECKMATE_SCORE + ply as f32
+        } else {
+            0.0
+        };
+
+        return SearchResult::leaf(eval);
     }
 
     // Return the best result found
