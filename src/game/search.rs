@@ -452,6 +452,9 @@ fn alpha_beta(
     let mut legal_moves_found = 0;
 
     for (move_index, board_move) in moves[0..move_count].iter().enumerate() {
+        let is_capture = game.is_capture(*board_move);
+        let was_in_check = game.is_king_in_check(game.side);
+
         game.make_move(*board_move);
 
         if game.is_king_in_check(!game.side) {
@@ -502,9 +505,9 @@ fn alpha_beta(
             // Late move reduction for non-PV moves
             if move_index >= 4
                 && depth >= 3
-                && !game.is_capture(*board_move)
-                && !game.is_king_in_check(game.side)
-                && !game.is_check(*board_move)
+                && !is_capture
+                && !was_in_check
+                && !game.is_king_in_check(!game.side)
             {
                 // Search with reduced depth first
                 let reduced_depth = depth.saturating_sub(2);
