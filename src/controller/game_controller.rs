@@ -355,7 +355,7 @@ impl GameController {
                     MoveResultType::InvalidMove
                 }
             }
-            None => MoveResultType::InvalidNotation,
+            _ => MoveResultType::InvalidNotation,
         }
     }
 

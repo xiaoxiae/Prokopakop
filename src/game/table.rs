@@ -2,7 +2,7 @@ use crate::game::board::BoardMove;
 use crate::game::pieces::Color;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-const BUCKET_SIZE: usize = 4; // Number of entries per bucket
+const BUCKET_SIZE: usize = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum NodeType {
