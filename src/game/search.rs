@@ -15,6 +15,9 @@ use crate::game::opening_book::OpeningBook;
 use crate::game::pieces::{Color, Piece};
 use crate::game::table::{NodeType, TranspositionTable};
 
+const FUTILITY_MARGIN: [f32; 4] = [0.0, 200.0, 400.0, 600.0];
+const REVERSE_FUTILITY_MARGIN: [f32; 4] = [0.0, 150.0, 300.0, 500.0];
+
 #[derive(Debug, Clone)]
 pub struct SearchResult {
     pub best_move: BoardMove,
@@ -361,6 +364,7 @@ fn alpha_beta(
 
     let original_alpha = alpha;
     let is_pv_node = beta - alpha > 1.0; // PV nodes have open window
+    let in_check = game.is_king_in_check(game.side);
 
     // Probe transposition table
     let mut tt_move = None;
@@ -400,11 +404,28 @@ fn alpha_beta(
         return quiescence_search(game, ply, alpha, beta, stop_flag, stats, limits);
     }
 
+    let static_eval = if !in_check {
+        game.evaluate() * game.side
+    } else {
+        -f32::INFINITY // Don't use static eval when in check
+    };
+
+    // Reverse futility pruning (static eval pruning)
+    // If our position is so good that even with a margin we're above beta, we can return
+    if !is_pv_node && !in_check && depth <= 3 && beta.abs() < CHECKMATE_SCORE - 1000.0 {
+        let margin = REVERSE_FUTILITY_MARGIN[depth.min(3)];
+        if static_eval - margin >= beta {
+            return SearchResult::leaf(beta);
+        }
+    }
+
     // Null move pruning (skip in PV nodes)
+    // Don't try null move if we're way below beta
     if !is_pv_node
         && depth >= 3
-        && !game.is_king_in_check(game.side)
+        && !in_check
         && beta.abs() < CHECKMATE_SCORE - 1000.0
+        && static_eval >= beta - 100.0
     {
         game.make_null_move();
 
@@ -432,10 +453,24 @@ fn alpha_beta(
         }
     }
 
+    // Check if futility pruning can be applied to this node
+    let futility_pruning_enabled = !is_pv_node
+        && !in_check
+        && depth <= FUTILITY_MARGIN.len() - 1
+        && alpha.abs() < CHECKMATE_SCORE - 1000.0;
+
+    let futility_margin = if futility_pruning_enabled {
+        FUTILITY_MARGIN[depth.min(FUTILITY_MARGIN.len() - 1)]
+    } else {
+        f32::INFINITY
+    };
+
+    let can_prune_node = futility_pruning_enabled && static_eval + futility_margin <= alpha;
+
     let (move_count, mut moves) = game.get_moves();
 
     if move_count == 0 {
-        let eval = if game.is_king_in_check(game.side) {
+        let eval = if in_check {
             -CHECKMATE_SCORE + ply as f32
         } else {
             0.0
@@ -467,10 +502,29 @@ fn alpha_beta(
     let mut best_value = -f32::INFINITY;
     let mut best_pv = Vec::new();
     let mut moves_searched = 0;
+    let mut quiet_moves_searched = 0;
 
     for (move_index, board_move) in moves[0..move_count].iter().enumerate() {
         let is_capture = game.is_capture(*board_move);
-        let was_in_check = game.is_king_in_check(game.side);
+        let is_promotion = board_move.get_promotion().is_some();
+        let gives_check = game.is_check(*board_move);
+
+        let is_quiet_move = !is_capture && !is_promotion && !gives_check;
+
+        // Futility pruning: Skip quiet moves if position is hopeless
+        if can_prune_node && is_quiet_move {
+            continue;
+        }
+
+        // Extended futility pruning for individual moves at depth 2-3
+        if futility_pruning_enabled && depth >= 2 && is_quiet_move && quiet_moves_searched >= 3 {
+            // Use a more aggressive margin for individual move pruning
+            let move_futility_margin = futility_margin * 1.5;
+            if static_eval + move_futility_margin <= alpha {
+                quiet_moves_searched += 1;
+                continue;
+            }
+        }
 
         game.make_move(*board_move);
 
@@ -515,8 +569,8 @@ fn alpha_beta(
             // Late move reduction for non-PV moves
             if move_index >= 4
                 && depth >= 3
-                && !is_capture
-                && !was_in_check
+                && is_quiet_move
+                && !in_check
                 && !game.is_king_in_check(!game.side)
             {
                 // Search with reduced depth first
@@ -547,6 +601,9 @@ fn alpha_beta(
                     position_history.pop();
                     game.unmake_move();
                     moves_searched += 1;
+                    if is_quiet_move {
+                        quiet_moves_searched += 1;
+                    }
                     continue;
                 }
                 // Otherwise, we need to do a full depth search
@@ -605,6 +662,9 @@ fn alpha_beta(
         position_history.pop();
         game.unmake_move();
         moves_searched += 1;
+        if is_quiet_move {
+            quiet_moves_searched += 1;
+        }
 
         alpha = alpha.max(best_value);
         if alpha >= beta {
