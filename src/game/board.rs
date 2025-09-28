@@ -1511,11 +1511,15 @@ impl Game {
         positions
     }
 
-    pub(crate) fn get_pseudo_legal_moves(&self) -> (usize, [BoardMove; 256]) {
-        match self.side {
+    pub(crate) fn get_side_pseudo_legal_moves(&self, color: Color) -> (usize, [BoardMove; 256]) {
+        match color {
             Color::White => self.get_pseudo_legal_moves_const::<ConstWhite>(),
             Color::Black => self.get_pseudo_legal_moves_const::<ConstBlack>(),
         }
+    }
+
+    pub(crate) fn get_pseudo_legal_moves(&self) -> (usize, [BoardMove; 256]) {
+        return self.get_side_pseudo_legal_moves(self.side);
     }
 
     fn get_pseudo_legal_moves_const<C: ConstColor>(&self) -> (usize, [BoardMove; 256]) {
