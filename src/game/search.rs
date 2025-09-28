@@ -352,14 +352,15 @@ fn alpha_beta(
 
     // Threefold repetition checks (only for low depths since this one is costly)
     let zobrist_key = game.zobrist_key;
+
+    if game.is_fifty_move_rule() {
+        return SearchResult::leaf(0.0);
+    }
+
     if ply > 1 && ply <= 3 {
         if position_history.is_threefold_repetition(zobrist_key) {
             return SearchResult::leaf(0.0);
         }
-    }
-
-    if game.is_fifty_move_rule() {
-        return SearchResult::leaf(0.0);
     }
 
     let original_alpha = alpha;
@@ -567,7 +568,7 @@ fn alpha_beta(
             }
         } else {
             // Late move reduction for non-PV moves
-            if move_index >= 4
+            if move_index >= 3
                 && depth >= 3
                 && is_quiet_move
                 && !in_check
