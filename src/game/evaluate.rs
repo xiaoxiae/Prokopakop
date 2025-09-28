@@ -266,8 +266,6 @@ fn count_doubled_pawns(pawns: Bitboard) -> u32 {
 }
 
 fn is_isolated_pawn(pawn_square: u8, friendly_pawns: Bitboard) -> bool {
-    return false;
-
     let file = pawn_square.get_x();
 
     const FILE_A: u64 = 0x0101010101010101;
@@ -358,8 +356,8 @@ pub fn evaluate_positional(game: &Game, game_phase: f32) -> f32 {
 pub fn evaluate_mobility(game: &Game, game_phase: f32) -> f32 {
     let mobility_score;
 
-    let (white_move_count, white_moves) = game.get_side_moves(Color::White);
-    let (black_move_count, black_moves) = game.get_side_moves(Color::Black);
+    let (white_move_count, white_moves) = game.get_side_pseudo_legal_moves(Color::White);
+    let (black_move_count, black_moves) = game.get_side_pseudo_legal_moves(Color::Black);
 
     let white_weighted = calculate_weighted_mobility(&game, &white_moves[..white_move_count]);
     let black_weighted = calculate_weighted_mobility(&game, &black_moves[..black_move_count]);
