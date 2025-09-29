@@ -49,6 +49,18 @@ impl SearchResult {
             pv: new_pv,
         }
     }
+
+    fn interrupted() -> Self {
+        Self {
+            best_move: BoardMove::empty(),
+            evaluation: f32::NAN,
+            pv: Vec::new(),
+        }
+    }
+
+    fn is_valid(&self) -> bool {
+        !self.evaluation.is_nan()
+    }
 }
 
 /// Search limits and parameters
@@ -121,6 +133,25 @@ impl SearchStats {
         }
 
         false
+    }
+
+    // New: Check if we have enough time for another iteration
+    pub fn has_time_for_iteration(&self, limits: &SearchLimits, last_iteration_ms: u64) -> bool {
+        if limits.infinite {
+            return true;
+        }
+
+        if let Some(max_time_ms) = limits.max_time_ms {
+            let elapsed = self.get_elapsed_ms();
+            let remaining = max_time_ms.saturating_sub(elapsed);
+
+            // Deeper searches take longer, we'll use 2.5 for now
+            let estimated_next_iteration_ms = (last_iteration_ms as f64 * 2.5) as u64;
+
+            return remaining >= estimated_next_iteration_ms;
+        }
+
+        true
     }
 }
 
@@ -235,8 +266,9 @@ pub fn iterative_deepening(
     opening_book: Option<&OpeningBook>,
 ) -> SearchResult {
     let mut stats = SearchStats::new();
-    let mut best_result = SearchResult::leaf(0.0);
+    let mut best_completed_result = SearchResult::leaf(0.0);
     let mut previous_pv: Vec<BoardMove> = Vec::new();
+    let mut last_iteration_ms = 0u64;
 
     // Check opening book first
     if let Some(book) = opening_book {
@@ -278,15 +310,27 @@ pub fn iterative_deepening(
     let mut history_table = HistoryTable::new();
 
     for depth in 1..=limits.max_depth.unwrap_or(256) {
+        // Check if we have enough time for this iteration (skip for first few depths)
+        if depth > 3 && last_iteration_ms > 0 {
+            if !stats.has_time_for_iteration(&limits, last_iteration_ms) {
+                println!(
+                    "info string Skipping depth {} due to time constraints",
+                    depth
+                );
+                break;
+            }
+        }
+
+        let iteration_start = Instant::now();
         stats.current_depth = depth as u64;
 
-        let result = if depth > 1 && !best_result.pv.is_empty() {
+        let result = if depth > 1 && !best_completed_result.pv.is_empty() {
             aspiration_search(
                 game,
                 depth,
-                best_result.evaluation,
+                best_completed_result.evaluation,
                 &previous_pv,
-                best_result.best_move,
+                best_completed_result.best_move,
                 &stop_flag,
                 &mut stats,
                 &limits,
@@ -313,21 +357,39 @@ pub fn iterative_deepening(
             )
         };
 
-        if !stats.should_stop(&limits, &stop_flag) {
+        // Only accept the result if it's valid (not interrupted)
+        if result.is_valid() && !stats.should_stop(&limits, &stop_flag) {
             print_uci_info(depth, result.evaluation, &result.pv, &stats, tt, game.side);
-            best_result = result.clone();
+            best_completed_result = result.clone();
             previous_pv = result.pv;
+            last_iteration_ms = iteration_start.elapsed().as_millis() as u64;
 
             // If we found a checkmate, stop searching deeper
             if result.evaluation.abs() > CHECKMATE_SCORE - 1000.0 {
                 break;
             }
         } else {
+            // Search was interrupted, don't update best_completed_result
+            println!("info string Search interrupted at depth {}", depth);
             break;
         }
     }
 
-    best_result
+    // Always return the best move from the last completed iteration
+    if best_completed_result.best_move == BoardMove::empty() {
+        // Emergency fallback: if we somehow have no completed iteration,
+        // at least return the first legal move
+        let (count, moves) = game.get_moves();
+        if count > 0 {
+            best_completed_result = SearchResult {
+                best_move: moves[0],
+                evaluation: 0.0,
+                pv: vec![moves[0]],
+            };
+        }
+    }
+
+    best_completed_result
 }
 
 fn alpha_beta(
@@ -346,8 +408,9 @@ fn alpha_beta(
     history_table: &mut HistoryTable,
 ) -> SearchResult {
     stats.increment_nodes();
+
     if stats.should_stop(&limits, &stop_flag) {
-        return SearchResult::leaf(game.evaluate() * game.side);
+        return SearchResult::interrupted();
     }
 
     // Threefold repetition checks (only for low depths since this one is costly)
@@ -561,6 +624,12 @@ fn alpha_beta(
             );
             value = -result.evaluation;
 
+            if !result.is_valid() {
+                position_history.pop();
+                game.unmake_move();
+                return SearchResult::interrupted();
+            }
+
             if value > best_value {
                 best_value = value;
                 best_move = *board_move;
@@ -591,6 +660,12 @@ fn alpha_beta(
                     killer_moves,
                     history_table,
                 );
+
+                if !reduced_result.is_valid() {
+                    position_history.pop();
+                    game.unmake_move();
+                    return SearchResult::interrupted();
+                }
 
                 value = -reduced_result.evaluation;
 
@@ -626,6 +701,13 @@ fn alpha_beta(
                 killer_moves,
                 history_table,
             );
+
+            if !null_window_result.is_valid() {
+                position_history.pop();
+                game.unmake_move();
+                return SearchResult::interrupted();
+            }
+
             value = -null_window_result.evaluation;
 
             // If the null window search fails high, re-search with full window
@@ -782,6 +864,15 @@ fn aspiration_search(
             history_table,
         );
 
+        // If search was interrupted, return the previous best move
+        if !result.is_valid() {
+            return SearchResult {
+                best_move: previous_best_move,
+                evaluation: previous_score,
+                pv: previous_pv.to_vec(),
+            };
+        }
+
         // If search was interrupted and returned empty move, fall back to previous result
         if result.best_move == BoardMove::empty() && previous_best_move != BoardMove::empty() {
             return SearchResult {
@@ -793,14 +884,16 @@ fn aspiration_search(
 
         // Check if we should stop before continuing
         if stats.should_stop(limits, stop_flag) {
-            if result.best_move == BoardMove::empty() && previous_best_move != BoardMove::empty() {
+            // Return the last valid result we have
+            if result.best_move != BoardMove::empty() {
+                return result;
+            } else {
                 return SearchResult {
                     best_move: previous_best_move,
                     evaluation: previous_score,
                     pv: previous_pv.to_vec(),
                 };
             }
-            return result;
         }
 
         if result.evaluation <= alpha {
@@ -869,7 +962,7 @@ fn quiescence_search(
     stats.increment_nodes();
 
     if stats.should_stop(&limits, &stop_flag) {
-        return SearchResult::leaf(game.evaluate() * game.side);
+        return SearchResult::interrupted();
     }
 
     // Limit quiescence search depth to prevent explosion
@@ -942,6 +1035,11 @@ fn quiescence_search(
         game.make_move(*board_move);
 
         let result = quiescence_search(game, ply + 1, -beta, -alpha, stop_flag, stats, limits);
+
+        if !result.is_valid() {
+            game.unmake_move();
+            return SearchResult::interrupted();
+        }
 
         game.unmake_move();
 
