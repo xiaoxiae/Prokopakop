@@ -782,7 +782,13 @@ fn alpha_beta(
         game.side,
     );
 
-    SearchResult::with_pv(best_move, best_value, best_pv)
+    // Don't include empty PV moves
+    if best_move == BoardMove::empty() {
+        // If no move was selected (all pruned or failed), return leaf evaluation
+        SearchResult::leaf(best_value)
+    } else {
+        SearchResult::with_pv(best_move, best_value, best_pv)
+    }
 }
 
 fn calculate_delta_margin(game: &Game, board_move: &BoardMove) -> f32 {
