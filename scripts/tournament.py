@@ -11,23 +11,32 @@ import seaborn as sns
 from pathlib import Path
 
 COMMIT_NAMES = [
-    "6aec863",  # functional alpha/beta + iterative deepening + material eval with position tables
+    # "6aec863",  # functional alpha/beta + iterative deepening + material eval with position tables
     # "53a09e5",  # move ordering via pv + mvv-lva
-    "bbef3be",  # quiescence search
+    # "bbef3be",  # quiescence search
     # "35f6fb6",  # transposition table
     # "ff14c29",  # faster eval
-    "7ff40fc",  # threefold repetition detection
+    # "7ff40fc",  # threefold repetition detection
     # "ab3fdc8",  # passed / doubled pawns
     "6c4e7ee",  # piece mobility
     # "a28d291",  # delta pruning for quiescence search
     # "2c1a839",  # killer moves
-    "fed61d5",  # fast passed pawn eval
+    # "fed61d5",  # fast passed pawn eval
     # "10c64e9",  # null move pruning
     # "5047857",  # late move reduction
     "93743a2",  # bishop pair + faster move generation
     # "a56e0f7",  # better piece tables + isolated pawns
     # "1fb64eb",  # LMR bugfix
-    "7cfbb74",  # PV search
+    # "7cfbb74",  # PV search
+    # "5ddad41",  # bucket TT
+    # "6e3bad1",  # history heuristic
+    # "c14002b",  # pseudo-legal move generation
+    # "e6662f0",  # LMR bug
+    "075f411",  # actually, no pseudo-legal move generation
+    # "7490eba",  # futility pruning
+    "8024a6e",  # no partial result usage + better iterative deepening time management
+    "c144fb9",  # no TT cleaning between moves
+    "5063949",  # king safety
 ]
 
 MASTER_OPTIONS = {
@@ -131,12 +140,11 @@ def build_fastchess_command(commit_names, add_master=False, last_n=None):
 
     # Add common parameters
     cmd.extend([
-        "-each", "tc=5+.1",
+        "-each", "tc=10+0.1", "restart=on",
         "-rounds", "200",
         "-concurrency", "32",
         "-config", "outname=scripts/tournament_results.json",
-        "-openings", "file=assets/book.edp",
-        "order=random",
+        "-openings", "file=data/book.pgn", "format=pgn", "plies=8", "order=random",
     ])
 
     return cmd
