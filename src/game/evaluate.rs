@@ -168,6 +168,9 @@ const BISHOP_ATTACK_WEIGHT: f32 = 2.0;
 const ROOK_ATTACK_WEIGHT: f32 = 3.0;
 const QUEEN_ATTACK_WEIGHT: f32 = 5.0;
 
+const MULTI_ATTACK_WEIGHT: f32 = 20.0;
+const SQUARE_ATTACK_FACTOR: f32 = 1.0 / 50.0;
+
 fn get_positional_piece_value(piece: Piece, square: usize, color: Color, game_phase: f32) -> f32 {
     let adjusted_square = match color {
         Color::Black => square,
@@ -547,8 +550,18 @@ fn get_king_zone(king_square: BoardSquare, color: Color) -> Bitboard {
     adjacent | forward_zone
 }
 
-fn count_king_zone_attacks(game: &Game, moves: &[BoardMove], king_zone: Bitboard) -> f32 {
-    let mut attack_score = 0.0;
+struct KingAttackInfo {
+    attack_weight: f32,
+    attacker_count: u32,
+}
+
+fn count_king_zone_attacks(
+    game: &Game,
+    moves: &[BoardMove],
+    king_zone: Bitboard,
+) -> KingAttackInfo {
+    let mut attack_weight = 0.0;
+    let mut attacking_pieces = Bitboard::default();
 
     for mv in moves {
         let mask = mv.get_to().to_mask();
@@ -557,6 +570,9 @@ fn count_king_zone_attacks(game: &Game, moves: &[BoardMove], king_zone: Bitboard
         if (mask & king_zone) != 0 {
             let from_square = mv.get_from();
             let piece = game.pieces[from_square as usize].unwrap().0;
+
+            // Track unique attackers using bitboard
+            attacking_pieces |= from_square.to_mask();
 
             // Weight by piece type
             let weight = match piece {
@@ -568,11 +584,14 @@ fn count_king_zone_attacks(game: &Game, moves: &[BoardMove], king_zone: Bitboard
                 Piece::King => 0.0,
             };
 
-            attack_score += weight;
+            attack_weight += weight;
         }
     }
 
-    attack_score
+    KingAttackInfo {
+        attack_weight,
+        attacker_count: attacking_pieces.count_ones(),
+    }
 }
 
 fn evaluate_king_zone_attacks(
@@ -582,10 +601,17 @@ fn evaluate_king_zone_attacks(
     moves: &[BoardMove],
 ) -> f32 {
     let zone = get_king_zone(king_square, color);
-    let attack_count = count_king_zone_attacks(game, moves, zone);
+    let attack_info = count_king_zone_attacks(game, moves, zone);
 
-    // The more attacks, the worse it is!
-    return -attack_count as f32;
+    let mut danger = attack_info.attack_weight;
+
+    // Bonus for multiple attackers
+    if attack_info.attacker_count >= 2 {
+        danger += (attack_info.attacker_count - 1) as f32 * MULTI_ATTACK_WEIGHT;
+    }
+
+    // Quadratic scaling (with a small factor so it's not too crazy)
+    -danger * danger / SQUARE_ATTACK_FACTOR
 }
 
 pub fn evaluate_king_safety(
