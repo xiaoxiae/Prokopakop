@@ -10,6 +10,7 @@ pub(crate) enum GUICommand {
     Search(Vec<String>),               // go (with params)
     Stop,                              // stop
     Quit,                              // quit the program
+    Eval,                              // eval - print detailed evaluation
 
     Invalid(String), // placeholder for invalid commands so we can pattern match
 }
@@ -56,6 +57,7 @@ impl GUICommand {
             }
             ["stop"] => GUICommand::Stop,
             ["quit"] => GUICommand::Quit,
+            ["eval"] => GUICommand::Eval,
             _ => GUICommand::Invalid(input),
         }
     }
