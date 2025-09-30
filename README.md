@@ -14,25 +14,28 @@ A moderately fast UCI chess engine written in Rust that **kops the Prokop**.
 
 <figure>
     <img src="scripts/benchmark.png" alt="Performance Across Commits" width="100%">
-    <figcaption><em>Performance benchmarks across git commits on a i9-14900K. Benchmarks use perft 5, hashing and bulk-counting.</em></figcaption>
+    <figcaption><em>Performance benchmarks across git commits on a i9-14900K. Benchmarks use perft 5, hashing and bulk-counting. Slower than Stockfish, but faster than making them manually.</em></figcaption>
 </figure>
 
 ### Search
 
-- **[Alpha-Beta](https://www.chessprogramming.org/Alpha-Beta)** via **[Negamax](https://www.chessprogramming.org/Negamax)**
+- **[Alpha-Beta](https://www.chessprogramming.org/Alpha-Beta)** via **[Negamax](https://www.chessprogramming.org/Negamax)** with **[PV-Search](https://www.chessprogramming.org/Principal_Variation_Search)**
 - **[Iterative Deepening](https://www.chessprogramming.org/Iterative_Deepening)** with [Aspiration Windows](https://www.chessprogramming.org/Aspiration_Windows)
-- **[Move Ordering](https://www.chessprogramming.org/Move_Ordering)** - PV moves, hash moves, [MVV-LVA](https://www.chessprogramming.org/MVV-LVA), [killer moves](https://www.chessprogramming.org/Killer_Heuristic)
+- **[Move Ordering](https://www.chessprogramming.org/Move_Ordering)** - PV moves, hash moves, [MVV-LVA](https://www.chessprogramming.org/MVV-LVA), [killer moves](https://www.chessprogramming.org/Killer_Heuristic), [history heuristic](https://www.chessprogramming.org/History_Heuristic)
 - **[Quiescence Search](https://www.chessprogramming.org/Quiescence_Search)** with [Delta Pruning](https://www.chessprogramming.org/Delta_Pruning)
 - **[Transposition Table](https://www.chessprogramming.org/Transposition_Table)**
 - **[Null Move Pruning](https://www.chessprogramming.org/Null_Move_Pruning)**
 - **[Late Move Reduction](https://www.chessprogramming.org/Late_Move_Reductions)**
+- **[Futility Pruning](https://www.chessprogramming.org/Futility_Pruning)** (forward + reverse)
+- **[Quiet Move Pruning](https://www.chessprogramming.org/Futility_Pruning#Quiet_Move_Pruning)**
 
 ### Evaluation
 
-- [Material](https://www.chessprogramming.org/Material)
-- [Piece-Square tables](https://www.chessprogramming.org/Piece-Square_Tables)
-- [Pawn Structure](https://www.chessprogramming.org/Pawn_Structure) (doubled pawns, passed pawns)
-- [Piece Mobility](https://www.chessprogramming.org/Mobility)
+- [Material](https://www.chessprogramming.org/Material) with [Bishop Pair](https://www.chessprogramming.org/Bishop_Pair) bonus
+- [Piece-Square tables](https://www.chessprogramming.org/Piece-Square_Tables) with game phase interpolation
+- [Pawn Structure](https://www.chessprogramming.org/Pawn_Structure) (doubled pawns, passed pawns, isolated pawns)
+- [Piece Mobility](https://www.chessprogramming.org/Mobility) using pseudo-legal move generation
+- **[King Safety](https://www.chessprogramming.org/King_Safety)** (pawn shield, open files, enemy piece attacks in king zone)
 
 
 <figure>
@@ -64,40 +67,17 @@ stop                             # Stop current search
 quit                             # Exit engine
 ```
 
-### Opening Book
-
-Prokopakop supports opening books built from PGN game collections:
-
-#### Building an Opening Book
-```bash
-# Build opening book from PGN files
-prokopakop --build-book games.pgn -o opening.book
-
-# With custom settings
-prokopakop --build-book *.pgn -o opening.book --min-count 5 --max-positions 50000
-```
-
-**Options:**
-- `--min-count N`: Only keep positions that appear at least N times (default: 3)
-- `--max-positions N`: Keep at most N positions (default: 100,000)
-
-#### Using an Opening Book
-Set the `OwnBook` UCI option to the path of your opening book file:
+and also some special commands that are not UCI-compliant, but I'm a rebel:
 
 ```
-setoption name OwnBook value path/to/opening.book
-```
-
-The engine will automatically use opening book moves when available, displaying:
-```
-info string Using opening book move
+eval                             # Show detailed position evaluation
+joke                             # Tells a random joke... just be careful to not ask for too many
 ```
 
 ### Command Line Options
 ```bash
-prokopakop                    # Start in UCI mode
-prokopakop --magic            # Bootstrap magic bitboards
-prokopakop --build-book <pgn> -o <book>  # Build opening book
+prokopakop          # Start in UCI mode
+prokopakop --magic  # Bootstrap magic bitboards
 ```
 
 ## Resources
