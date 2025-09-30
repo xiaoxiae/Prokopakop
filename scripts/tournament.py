@@ -36,7 +36,7 @@ COMMIT_NAMES = [
     # "7490eba",  # futility pruning
     "8024a6e",  # no partial result usage + better iterative deepening time management
     "c144fb9",  # no TT cleaning between moves
-    "5063949",  # king safety
+    "5cc228e",  # king safety
 ]
 
 MASTER_OPTIONS = {

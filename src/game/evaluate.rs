@@ -611,7 +611,7 @@ fn evaluate_king_zone_attacks(
     }
 
     // Quadratic scaling (with a small factor so it's not too crazy)
-    -danger * danger / SQUARE_ATTACK_FACTOR
+    -(danger * danger) * SQUARE_ATTACK_FACTOR
 }
 
 pub fn evaluate_king_safety(
