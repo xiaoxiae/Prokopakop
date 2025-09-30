@@ -432,7 +432,7 @@ fn alpha_beta(
 
     // Probe transposition table
     let mut tt_move = None;
-    if let Some(tt_entry) = tt.probe(zobrist_key, game.side) {
+    if let Some(tt_entry) = tt.probe(zobrist_key) {
         tt_move = Some(tt_entry.best_move);
 
         // Use TT value if depth is sufficient (but not in PV nodes for exact scores)
@@ -546,7 +546,6 @@ fn alpha_beta(
             eval,
             BoardMove::empty(),
             NodeType::Exact,
-            game.side,
         );
 
         return SearchResult::leaf(eval);
@@ -773,14 +772,7 @@ fn alpha_beta(
         NodeType::Exact // Exact value
     };
 
-    tt.store(
-        zobrist_key,
-        depth as u8,
-        best_value,
-        best_move,
-        node_type,
-        game.side,
-    );
+    tt.store(zobrist_key, depth as u8, best_value, best_move, node_type);
 
     // Don't include empty PV moves
     if best_move == BoardMove::empty() {
