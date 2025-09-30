@@ -2,7 +2,7 @@ use strum::EnumCount;
 
 use crate::game::board::{BoardMove, BoardMoveExt, Game};
 use crate::game::pieces::{Color, Piece};
-use crate::utils::bitboard::{Bitboard, BitboardExt};
+use crate::utils::bitboard::{Bitboard, BitboardExt, PIECE_MOVE_BITBOARDS};
 use crate::utils::square::{BoardSquare, BoardSquareExt};
 
 // Do not increase this! We're using it to count moves to checkmate
@@ -161,6 +161,12 @@ pub const MISSING_KING_FILE_PAWN_PENALTY: f32 = -10.0;
 pub const OPEN_FILE_NEAR_KING_PENALTY: f32 = -25.0;
 pub const SEMI_OPEN_FILE_NEAR_KING_PENALTY: f32 = -15.0;
 pub const OPEN_FILE_WITH_ROOK_PENALTY: f32 = -15.0;
+
+const PAWN_ATTACK_WEIGHT: f32 = 1.0;
+const KNIGHT_ATTACK_WEIGHT: f32 = 2.0;
+const BISHOP_ATTACK_WEIGHT: f32 = 2.0;
+const ROOK_ATTACK_WEIGHT: f32 = 3.0;
+const QUEEN_ATTACK_WEIGHT: f32 = 5.0;
 
 fn get_positional_piece_value(piece: Piece, square: usize, color: Color, game_phase: f32) -> f32 {
     let adjusted_square = match color {
@@ -381,14 +387,16 @@ pub fn evaluate_positional(game: &Game, game_phase: f32) -> f32 {
     positional
 }
 
-pub fn evaluate_mobility(game: &Game, game_phase: f32) -> f32 {
+pub fn evaluate_mobility(
+    game: &Game,
+    game_phase: f32,
+    white_moves: &[BoardMove],
+    black_moves: &[BoardMove],
+) -> f32 {
     let mobility_score;
 
-    let (white_move_count, white_moves) = game.get_side_pseudo_legal_moves(Color::White);
-    let (black_move_count, black_moves) = game.get_side_pseudo_legal_moves(Color::Black);
-
-    let white_weighted = calculate_weighted_mobility(&game, &white_moves[..white_move_count]);
-    let black_weighted = calculate_weighted_mobility(&game, &black_moves[..black_move_count]);
+    let white_weighted = calculate_weighted_mobility(&game, &white_moves);
+    let black_weighted = calculate_weighted_mobility(&game, &black_moves);
 
     mobility_score = (white_weighted - black_weighted) * (1.0 + game_phase * MOBILITY_MULTIPLIER);
 
@@ -498,29 +506,104 @@ fn evaluate_open_files_near_king(game: &Game, color: Color, king_square: BoardSq
     open_file_penalty
 }
 
-pub fn calculate_king_danger(game: &Game, color: Color) -> f32 {
+///
+/// Return the safety score for the king of the given color.
+/// The **higher** the value, the more safe it is.
+///
+pub fn calculate_king_safety(game: &Game, color: Color, opponent_moves: &[BoardMove]) -> f32 {
     let king_square = game.get_king_position(color);
 
-    let mut danger = 0.0;
+    let mut safety = 0.0;
 
-    danger += evaluate_king_pawn_shield(game, color, king_square);
+    safety += evaluate_king_pawn_shield(game, color, king_square);
+    safety += evaluate_open_files_near_king(game, color, king_square);
+    safety += evaluate_king_zone_attacks(game, color, king_square, opponent_moves);
 
-    danger += evaluate_open_files_near_king(game, color, king_square);
-
-    danger
+    safety
 }
 
-pub fn evaluate_king_safety(game: &Game, game_phase: f32) -> f32 {
-    // Stop caring about king safety at some point
+fn get_king_zone(king_square: BoardSquare, color: Color) -> Bitboard {
+    const FILE_A: Bitboard = Bitboard::FILES[0];
+    const FILE_H: Bitboard = Bitboard::FILES[7];
+
+    let king_bb = king_square.to_mask();
+
+    let adjacent = PIECE_MOVE_BITBOARDS[Piece::King as usize][king_square as usize];
+
+    let forward_1 = match color {
+        Color::White => king_bb << 8,
+        Color::Black => king_bb >> 8,
+    };
+
+    let forward_2 = match color {
+        Color::White => king_bb << 16,
+        Color::Black => king_bb >> 16,
+    };
+
+    let forward_zone = (forward_1 | forward_2)
+        | ((forward_1 | forward_2) << 1) & !FILE_A
+        | ((forward_1 | forward_2) >> 1) & !FILE_H;
+
+    adjacent | forward_zone
+}
+
+fn count_king_zone_attacks(game: &Game, moves: &[BoardMove], king_zone: Bitboard) -> f32 {
+    let mut attack_score = 0.0;
+
+    for mv in moves {
+        let mask = mv.get_to().to_mask();
+
+        // Check if this move attacks the king zone
+        if (mask & king_zone) != 0 {
+            let from_square = mv.get_from();
+            let piece = game.pieces[from_square as usize].unwrap().0;
+
+            // Weight by piece type
+            let weight = match piece {
+                Piece::Pawn => PAWN_ATTACK_WEIGHT,
+                Piece::Knight => KNIGHT_ATTACK_WEIGHT,
+                Piece::Bishop => BISHOP_ATTACK_WEIGHT,
+                Piece::Rook => ROOK_ATTACK_WEIGHT,
+                Piece::Queen => QUEEN_ATTACK_WEIGHT,
+                Piece::King => 0.0,
+            };
+
+            attack_score += weight;
+        }
+    }
+
+    attack_score
+}
+
+fn evaluate_king_zone_attacks(
+    game: &Game,
+    color: Color,
+    king_square: BoardSquare,
+    moves: &[BoardMove],
+) -> f32 {
+    let zone = get_king_zone(king_square, color);
+    let attack_count = count_king_zone_attacks(game, moves, zone);
+
+    // The more attacks, the worse it is!
+    return -attack_count as f32;
+}
+
+pub fn evaluate_king_safety(
+    game: &Game,
+    game_phase: f32,
+    white_moves: &[BoardMove],
+    black_moves: &[BoardMove],
+) -> f32 {
+    // Stop caring about king safety in endgame
     if game_phase > 0.7 {
         return 0.0;
     }
 
-    let white_danger = calculate_king_danger(game, Color::White);
-    let black_danger = calculate_king_danger(game, Color::Black);
-
     // Scale by game phase (more important in middlegame)
     let phase_multiplier = (1.0 - game_phase) * KING_SAFETY_MULTIPLIER;
 
-    (white_danger - black_danger) * phase_multiplier
+    let white_safety = calculate_king_safety(game, Color::White, black_moves);
+    let black_safety = calculate_king_safety(game, Color::Black, white_moves);
+
+    (white_safety - black_safety) * phase_multiplier
 }

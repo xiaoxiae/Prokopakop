@@ -1480,16 +1480,25 @@ impl Game {
 
     pub(crate) fn evaluate(&self) -> f32 {
         let (white_material, black_material) = evaluate_material(self);
-
         let game_phase = calculate_game_phase(self);
+
+        let (white_move_count, white_moves) = self.get_side_pseudo_legal_moves(Color::White);
+        let (black_move_count, black_moves) = self.get_side_pseudo_legal_moves(Color::Black);
+
+        let white_moves_slice = &white_moves[..white_move_count];
+        let black_moves_slice = &black_moves[..black_move_count];
 
         let material_value = white_material - black_material;
         let positional_value = evaluate_positional(self, game_phase);
-        let mobility_value = evaluate_mobility(self, game_phase);
-        let bistop_pair_value = evaluate_bishop_pair(self, game_phase);
-        let king_safety = evaluate_king_safety(self, game_phase);
+        let bishop_pair_value = evaluate_bishop_pair(self, game_phase);
 
-        material_value + positional_value + mobility_value + bistop_pair_value + king_safety
+        let mobility_value =
+            evaluate_mobility(self, game_phase, white_moves_slice, black_moves_slice);
+
+        let king_safety =
+            evaluate_king_safety(self, game_phase, white_moves_slice, black_moves_slice);
+
+        material_value + positional_value + mobility_value + bishop_pair_value + king_safety
     }
 
     pub fn is_fifty_move_rule(&self) -> bool {

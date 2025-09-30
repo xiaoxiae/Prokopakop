@@ -1,4 +1,8 @@
 use crate::game::board::{BoardMove, BoardMoveExt, Game};
+use crate::game::evaluate::{
+    calculate_game_phase, calculate_king_safety, evaluate_bishop_pair, evaluate_material,
+    evaluate_mobility, evaluate_positional,
+};
 use crate::game::opening_book::OpeningBook;
 use crate::game::pieces::Color;
 use crate::game::search::{PositionHistory, SearchLimits, iterative_deepening};
@@ -514,17 +518,23 @@ impl GameController {
     }
 
     pub fn print_detailed_evaluation(&self) {
-        use crate::game::evaluate::*;
-
         let (white_material, black_material) = evaluate_material(&self.game);
         let game_phase = calculate_game_phase(&self.game);
 
+        let (white_move_count, white_moves) = self.game.get_side_pseudo_legal_moves(Color::White);
+        let (black_move_count, black_moves) = self.game.get_side_pseudo_legal_moves(Color::Black);
+
+        let white_moves_slice = &white_moves[..white_move_count];
+        let black_moves_slice = &black_moves[..black_move_count];
+
         let positional_value = evaluate_positional(&self.game, game_phase);
-        let mobility_value = evaluate_mobility(&self.game, game_phase);
         let bishop_pair_value = evaluate_bishop_pair(&self.game, game_phase);
 
-        let white_king_safety_value = evaluate_king_safety(&self.game, game_phase);
-        let black_king_safety_value = evaluate_king_safety(&self.game, game_phase);
+        let mobility_value =
+            evaluate_mobility(&self.game, game_phase, white_moves_slice, black_moves_slice);
+
+        let white_safety = calculate_king_safety(&self.game, Color::White, black_moves_slice);
+        let black_safety = calculate_king_safety(&self.game, Color::Black, white_moves_slice);
 
         let total_evaluation = &self.game.evaluate();
 
@@ -539,8 +549,8 @@ impl GameController {
         println!("Mobility: {:.2}", mobility_value);
         println!("Bishop Pair: {:.2}", bishop_pair_value);
         println!("King Safety:");
-        println!("  White: {:.2}", white_king_safety_value);
-        println!("  Black: {:.2}", black_king_safety_value);
+        println!("  White: {:.2}", white_safety);
+        println!("  Black: {:.2}", black_safety);
         println!();
 
         println!("Total Evaluation: {:.2}", total_evaluation);
