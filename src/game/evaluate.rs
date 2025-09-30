@@ -3,7 +3,7 @@ use strum::EnumCount;
 use crate::game::board::{BoardMove, BoardMoveExt, Game};
 use crate::game::pieces::{Color, Piece};
 use crate::utils::bitboard::{Bitboard, BitboardExt};
-use crate::utils::square::BoardSquareExt;
+use crate::utils::square::{BoardSquare, BoardSquareExt};
 
 // Do not increase this! We're using it to count moves to checkmate
 // by incrementing via PLY and subtract later. Incrementing this too much
@@ -153,6 +153,15 @@ const KING_LATE_TABLE: [f32; 64] = [
     0.0, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.0,
 ];
 
+pub const KING_SAFETY_MULTIPLIER: f32 = 1.0;
+
+pub const MISSING_PAWN_SHIELD_PENALTY: f32 = -20.0;
+pub const MISSING_KING_FILE_PAWN_PENALTY: f32 = -10.0;
+
+pub const OPEN_FILE_NEAR_KING_PENALTY: f32 = -25.0;
+pub const SEMI_OPEN_FILE_NEAR_KING_PENALTY: f32 = -15.0;
+pub const OPEN_FILE_WITH_ROOK_PENALTY: f32 = -15.0;
+
 fn get_positional_piece_value(piece: Piece, square: usize, color: Color, game_phase: f32) -> f32 {
     let adjusted_square = match color {
         Color::Black => square,
@@ -189,13 +198,32 @@ fn get_positional_piece_value(piece: Piece, square: usize, color: Color, game_ph
     normalized_value * multiplier
 }
 
-// Calculate game phase (0.0 = early game, 1.0 = late game) based on material
-pub fn calculate_game_phase(total_material: f32) -> f32 {
-    let max_material =
+///
+/// Calculate game phase (0.0 = early game, 1.0 = late game) based on material
+///
+pub fn calculate_game_phase(game: &Game) -> f32 {
+    const STARTING_MATERIAL: f32 =
         2.0 * QUEEN_VALUE + 4.0 * ROOK_VALUE + 4.0 * BISHOP_VALUE + 4.0 * KNIGHT_VALUE;
 
-    let phase = 1.0 - (total_material / max_material).min(1.0);
-    phase.max(0.0)
+    let mut current_material = 0.0;
+
+    // Count all non-pawn, non-king pieces on the board
+    for piece in 0..Piece::COUNT {
+        let piece_type = Piece::from_repr(piece).unwrap();
+
+        if piece_type == Piece::Pawn || piece_type == Piece::King {
+            continue;
+        }
+
+        let piece_value = get_piece_value(piece_type);
+        let piece_count = game.piece_bitboards[piece].count_ones() as f32;
+        current_material += piece_count * piece_value;
+    }
+
+    let material_ratio = current_material / STARTING_MATERIAL;
+
+    let phase = 1.0 - material_ratio;
+    phase.clamp(0.0, 1.0)
 }
 
 pub fn evaluate_material(game: &Game) -> (f32, f32) {
@@ -225,8 +253,8 @@ fn is_passed_pawn(pawn_square: u8, color: Color, enemy_pawns: Bitboard) -> bool 
     let file = pawn_square.get_x();
     let rank = pawn_square.get_y();
 
-    const FILE_A: u64 = 0x0101010101010101;
-    const FILE_H: u64 = 0x8080808080808080;
+    const FILE_A: Bitboard = Bitboard::FILES[0];
+    const FILE_H: Bitboard = Bitboard::FILES[7];
 
     let center_file = FILE_A << file;
 
@@ -236,7 +264,7 @@ fn is_passed_pawn(pawn_square: u8, color: Color, enemy_pawns: Bitboard) -> bool 
     let files_mask = center_file | left_file | right_file;
 
     let rank_mask = match color {
-        Color::White => 0xFFFFFFFFFFFFFFFFu64 << ((rank + 1) * 8),
+        Color::White => Bitboard::ONES << ((rank + 1) * 8),
         Color::Black => {
             if rank > 0 {
                 (1u64 << (rank * 8)) - 1
@@ -255,7 +283,7 @@ fn count_doubled_pawns(pawns: Bitboard) -> u32 {
     let mut doubled = 0;
 
     for file in 0..8 {
-        let file_mask = 0x0101010101010101u64 << file;
+        let file_mask = Bitboard::FILES[file];
         let pawns_on_file = (pawns & file_mask).count_ones();
         if pawns_on_file > 1 {
             doubled += pawns_on_file - 1;
@@ -268,8 +296,8 @@ fn count_doubled_pawns(pawns: Bitboard) -> u32 {
 fn is_isolated_pawn(pawn_square: u8, friendly_pawns: Bitboard) -> bool {
     let file = pawn_square.get_x();
 
-    const FILE_A: u64 = 0x0101010101010101;
-    const FILE_H: u64 = 0x8080808080808080;
+    const FILE_A: u64 = Bitboard::FILES[0];
+    const FILE_H: u64 = Bitboard::FILES[7];
 
     let center_file = FILE_A << file;
 
@@ -406,4 +434,93 @@ pub fn evaluate_bishop_pair(game: &Game, game_phase: f32) -> f32 {
     }
 
     eval
+}
+
+fn evaluate_king_pawn_shield(game: &Game, color: Color, king_square: BoardSquare) -> f32 {
+    let friendly_pawns =
+        game.piece_bitboards[Piece::Pawn as usize] & game.color_bitboards[color as usize];
+
+    let file = king_square.get_x();
+
+    let mut shield_penalty = 0.0;
+
+    // Check pawns on king's file and adjacent files
+    for f in file.saturating_sub(1)..=(file + 1).min(7) {
+        let file_mask = Bitboard::FILES[f as usize];
+        let has_pawn = (friendly_pawns & file_mask) != 0;
+
+        if !has_pawn {
+            // Missing pawn in shield
+            shield_penalty += MISSING_PAWN_SHIELD_PENALTY;
+
+            // Extra penalty if it's the king's own file
+            if f == file {
+                shield_penalty += MISSING_KING_FILE_PAWN_PENALTY;
+            }
+        }
+    }
+
+    shield_penalty
+}
+
+fn evaluate_open_files_near_king(game: &Game, color: Color, king_square: BoardSquare) -> f32 {
+    let file = king_square.get_x();
+
+    let all_pawns = game.piece_bitboards[Piece::Pawn as usize];
+    let friendly_pawns = all_pawns & game.color_bitboards[color as usize];
+
+    let enemy_rooks_queens = (game.piece_bitboards[Piece::Rook as usize]
+        | game.piece_bitboards[Piece::Queen as usize])
+        & game.color_bitboards[!color as usize];
+
+    let mut open_file_penalty = 0.0;
+
+    for f in file.saturating_sub(1)..=(file + 1).min(7) {
+        let file_mask = Bitboard::FILES[f as usize];
+
+        let friendly_on_file = (friendly_pawns & file_mask) != 0;
+        let enemy_on_file = ((all_pawns & !friendly_pawns) & file_mask) != 0;
+        let enemy_heavy_on_file = (enemy_rooks_queens & file_mask) != 0;
+
+        if !friendly_on_file && !enemy_on_file {
+            // Fully open file
+            open_file_penalty += OPEN_FILE_NEAR_KING_PENALTY;
+
+            if enemy_heavy_on_file {
+                open_file_penalty += OPEN_FILE_WITH_ROOK_PENALTY;
+            }
+        } else if !friendly_on_file && enemy_on_file {
+            // Semi-open file (for us)
+            open_file_penalty += SEMI_OPEN_FILE_NEAR_KING_PENALTY;
+        }
+    }
+
+    open_file_penalty
+}
+
+pub fn calculate_king_danger(game: &Game, color: Color) -> f32 {
+    let king_square = game.get_king_position(color);
+
+    let mut danger = 0.0;
+
+    danger += evaluate_king_pawn_shield(game, color, king_square);
+
+    danger += evaluate_open_files_near_king(game, color, king_square);
+
+    danger
+}
+
+pub fn evaluate_king_safety(game: &Game, game_phase: f32) -> f32 {
+    // Stop caring about king safety at some point
+    if game_phase > 0.7 {
+        return 0.0;
+    }
+
+    let white_danger = calculate_king_danger(game, Color::White);
+    let black_danger = calculate_king_danger(game, Color::Black);
+
+    // Scale by game phase (more important in middlegame)
+    let phase_multiplier = (1.0 - game_phase) * KING_SAFETY_MULTIPLIER;
+
+    (white_danger - black_danger) * phase_multiplier
 }

@@ -1,7 +1,7 @@
 use super::pieces::{Color, Piece};
 use crate::game::evaluate::{
-    calculate_game_phase, evaluate_bishop_pair, evaluate_material, evaluate_mobility,
-    evaluate_positional,
+    calculate_game_phase, evaluate_bishop_pair, evaluate_king_safety, evaluate_material,
+    evaluate_mobility, evaluate_positional,
 };
 use crate::game::pieces::ColoredPiece;
 use crate::utils::bitboard::{
@@ -1481,14 +1481,15 @@ impl Game {
     pub(crate) fn evaluate(&self) -> f32 {
         let (white_material, black_material) = evaluate_material(self);
 
-        let game_phase = calculate_game_phase(white_material + black_material);
+        let game_phase = calculate_game_phase(self);
 
         let material_value = white_material - black_material;
         let positional_value = evaluate_positional(self, game_phase);
         let mobility_value = evaluate_mobility(self, game_phase);
         let bistop_pair_value = evaluate_bishop_pair(self, game_phase);
+        let king_safety = evaluate_king_safety(self, game_phase);
 
-        material_value + positional_value + mobility_value + bistop_pair_value
+        material_value + positional_value + mobility_value + bistop_pair_value + king_safety
     }
 
     pub fn is_fifty_move_rule(&self) -> bool {
@@ -1580,5 +1581,43 @@ impl Game {
             let target_bitboard = self.get_pseudo_legal_move_bitboard_const::<ConstPawn, C>(square);
             self.add_regular_moves(square, target_bitboard, moves, move_count);
         }
+    }
+
+    pub(crate) fn get_king_position(&self, color: Color) -> BoardSquare {
+        match color {
+            Color::White => self.get_king_position_const::<ConstWhite>(),
+            Color::Black => self.get_king_position_const::<ConstBlack>(),
+        }
+    }
+
+    pub(crate) fn get_attacked_from(&self, square: BoardSquare, color: Color) -> Bitboard {
+        match color {
+            Color::White => self.get_attacked_from_const::<ConstBlack>(square),
+            Color::Black => self.get_attacked_from_const::<ConstWhite>(square),
+        }
+    }
+
+    pub(crate) fn get_king_attacks(&self, color: Color) -> Bitboard {
+        match color {
+            Color::White => self.get_attacked_from_const::<ConstBlack>(
+                self.get_king_position_const::<ConstWhite>(),
+            ),
+            Color::Black => self.get_attacked_from_const::<ConstWhite>(
+                self.get_king_position_const::<ConstBlack>(),
+            ),
+        }
+    }
+
+    pub(crate) fn get_king_visibility(&self, color: Color) -> Bitboard {
+        return match color {
+            Color::White => self.get_occlusion_bitmap_const::<ConstQueen>(
+                self.get_king_position_const::<ConstWhite>(),
+                self.all_pieces,
+            ),
+            Color::Black => self.get_occlusion_bitmap_const::<ConstQueen>(
+                self.get_king_position_const::<ConstBlack>(),
+                self.all_pieces,
+            ),
+        };
     }
 }

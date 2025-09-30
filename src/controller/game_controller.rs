@@ -512,4 +512,37 @@ impl GameController {
         println!("option name PerftHash type check default true");
         println!("option name OwnBook type string default <empty>");
     }
+
+    pub fn print_detailed_evaluation(&self) {
+        use crate::game::evaluate::*;
+
+        let (white_material, black_material) = evaluate_material(&self.game);
+        let game_phase = calculate_game_phase(&self.game);
+
+        let positional_value = evaluate_positional(&self.game, game_phase);
+        let mobility_value = evaluate_mobility(&self.game, game_phase);
+        let bishop_pair_value = evaluate_bishop_pair(&self.game, game_phase);
+
+        let white_king_safety_value = evaluate_king_safety(&self.game, game_phase);
+        let black_king_safety_value = evaluate_king_safety(&self.game, game_phase);
+
+        let total_evaluation = &self.game.evaluate();
+
+        println!("=== Detailed Position Evaluation ===");
+        println!("Game Phase: {:.2}", game_phase);
+        println!();
+
+        println!("Material:");
+        println!("  White: {:.2}", white_material);
+        println!("  Black: {:.2}", black_material);
+        println!("Positional + pawns: {:.2}", positional_value);
+        println!("Mobility: {:.2}", mobility_value);
+        println!("Bishop Pair: {:.2}", bishop_pair_value);
+        println!("King Safety:");
+        println!("  White: {:.2}", white_king_safety_value);
+        println!("  Black: {:.2}", black_king_safety_value);
+        println!();
+
+        println!("Total Evaluation: {:.2}", total_evaluation);
+    }
 }

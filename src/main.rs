@@ -136,6 +136,7 @@ fn main() {
                 println!("\nNodes: {}", total);
             }
             GUICommand::Stop => controller.stop_search(),
+            GUICommand::Eval => controller.print_detailed_evaluation(),
             GUICommand::Invalid(command) => eprintln!("Invalid command: {}", command),
         }
     }
