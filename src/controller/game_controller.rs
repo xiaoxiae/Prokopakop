@@ -15,6 +15,23 @@ use std::sync::{
 };
 use std::thread::{self, JoinHandle};
 
+// I literally have a text file of jokes that I gathered over the years
+// Now there is a chance that somebody actually reads some of them
+//
+// Pull requests are very welcome :)
+const JOKES: &[&str] = &[
+    "How do you think the unthinkable? With an itheberg.",
+    "Say what you want about deaf people.",
+    "A man is washing the car with his son. The son asks, 'Dad, can't you just use a sponge?'",
+    "Two goldfish are in a tank. One looks to the other and says, 'You man the guns while I drive.'",
+    "Apparently, someone in London gets stabbed every 52 seconds. Poor bastard.",
+    "Want to hear a word I just made up? Plagiarism.",
+    "There is no 'i' in denial.",
+    "What's the difference between a bad golfer and a bad skydiver? One goes WHACK 'Damn.' and the other goes 'Damn.' WHACK",
+    "My grandfather has the heart of a lion and a lifetime ban at the zoo.",
+    "As I handed my dad his 50th birthday card, he looked at me and said: one would have been enough.",
+];
+
 pub struct GameController {
     pub game: Game,
     pub perft_hash: bool,
@@ -27,6 +44,7 @@ pub struct GameController {
     search_thread: Option<JoinHandle<BoardMove>>,
     stop_flag: Arc<AtomicBool>,
     tt: Arc<Mutex<TranspositionTable>>,
+    used_jokes: Vec<bool>,
 }
 
 #[derive(Debug)]
@@ -211,6 +229,7 @@ impl GameController {
             search_thread: None,
             stop_flag: Arc::new(AtomicBool::new(false)),
             tt: Arc::new(Mutex::new(TranspositionTable::new(128))),
+            used_jokes: vec![false; JOKES.len()],
         }
     }
 
@@ -554,5 +573,41 @@ impl GameController {
         println!();
 
         println!("Total Evaluation: {:.2}", total_evaluation);
+    }
+
+    pub fn tell_joke(&mut self) {
+        let available_indices: Vec<usize> = self
+            .used_jokes
+            .iter()
+            .enumerate()
+            .filter(|(_, used)| !*used)
+            .map(|(i, _)| i)
+            .collect();
+
+        // If no jokes are available, segfault C:
+        if available_indices.is_empty() {
+            unsafe {
+                let null_ptr: *mut u8 = std::ptr::null_mut();
+                *null_ptr = 42;
+            }
+        }
+
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let mut hasher = DefaultHasher::new();
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+            .hash(&mut hasher);
+        let random_seed = hasher.finish();
+
+        let selected_index = available_indices[random_seed as usize % available_indices.len()];
+
+        self.used_jokes[selected_index] = true;
+
+        println!("{}", JOKES[selected_index]);
     }
 }

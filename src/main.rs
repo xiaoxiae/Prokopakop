@@ -137,6 +137,7 @@ fn main() {
             }
             GUICommand::Stop => controller.stop_search(),
             GUICommand::Eval => controller.print_detailed_evaluation(),
+            GUICommand::Joke => controller.tell_joke(),
             GUICommand::Invalid(command) => eprintln!("Invalid command: {}", command),
         }
     }
