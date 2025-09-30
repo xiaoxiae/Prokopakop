@@ -231,16 +231,12 @@ impl GameController {
         self.game = Game::new(None);
         self.position_history = PositionHistory::new();
         self.position_history.push(self.game.zobrist_key);
-
-        self.reset_transposition_table();
     }
 
     pub fn set_board_from_fen(&mut self, fen: &str) {
         self.game = Game::new(Some(fen));
         self.position_history = PositionHistory::new();
         self.position_history.push(self.game.zobrist_key);
-
-        self.reset_transposition_table();
     }
 
     pub fn reset_transposition_table(&mut self) {
@@ -489,6 +485,10 @@ impl GameController {
 
             // Output the best move in UCI format
             println!("bestmove {}", result.best_move.unparse());
+
+            if let Ok(mut tt_guard) = tt.lock() {
+                tt_guard.prune_old_entries();
+            }
 
             result.best_move
         });

@@ -1,5 +1,4 @@
 use crate::game::board::BoardMove;
-use crate::game::pieces::Color;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 const BUCKET_SIZE: usize = 4;
@@ -40,14 +39,11 @@ impl TTEntry {
             return -1000;
         }
 
-        // Adjust weights based on testing
-        let depth_score = self.depth as i32 * 8; // Reduced from 10
+        let depth_score = self.depth as i32 * 8;
 
-        // More gradual age penalty
         let age_diff = current_generation.wrapping_sub(self.age);
         let age_penalty = (age_diff as i32).min(15) * 3;
 
-        // Differentiate node types more
         let node_type_bonus = match self.node_type {
             NodeType::Exact => 25,     // PV nodes most valuable
             NodeType::LowerBound => 5, // Cut nodes somewhat valuable
@@ -88,33 +84,20 @@ impl TranspositionTable {
 
     pub fn new_search(&mut self) {
         self.generation = self.generation.wrapping_add(1);
-
-        // Prune very old entries periodically
-        if self.generation % 16 == 0 {
-            self.prune_old_entries();
-        }
     }
 
     fn get_bucket_index(&self, key: u64) -> usize {
         (key as usize) % self.bucket_count
     }
 
-    pub fn probe(&self, key: u64, side: Color) -> Option<TTEntry> {
+    pub fn probe(&self, key: u64) -> Option<TTEntry> {
         let bucket_idx = self.get_bucket_index(key);
         let bucket = &self.buckets[bucket_idx];
 
-        // Search through bucket for matching key
         for entry in bucket.iter() {
             if entry.key == key {
                 self.hits.fetch_add(1, Ordering::Relaxed);
-
-                // Convert evaluation from white's perspective to current side's perspective
-                let mut adjusted_entry = *entry;
-                if side == Color::Black {
-                    adjusted_entry.evaluation = -adjusted_entry.evaluation;
-                }
-
-                return Some(adjusted_entry);
+                return Some(*entry);
             }
         }
 
@@ -129,22 +112,14 @@ impl TranspositionTable {
         evaluation: f32,
         best_move: BoardMove,
         node_type: NodeType,
-        side: Color,
     ) {
         let bucket_idx = self.get_bucket_index(key);
         let bucket = &mut self.buckets[bucket_idx];
 
-        // Convert evaluation to white's perspective for storage
-        let white_eval = if side == Color::Black {
-            -evaluation
-        } else {
-            evaluation
-        };
-
         let new_entry = TTEntry {
             key,
             depth,
-            evaluation: white_eval,
+            evaluation,
             best_move,
             node_type,
             age: self.generation,
@@ -152,13 +127,17 @@ impl TranspositionTable {
 
         // First pass: look for same position or empty slot
         for i in 0..BUCKET_SIZE {
-            if bucket[i].key == key || bucket[i].key == 0 {
-                let was_empty = bucket[i].key == 0;
-                bucket[i] = new_entry;
-
-                if was_empty {
-                    self.filled_entries.fetch_add(1, Ordering::Relaxed);
+            if bucket[i].key == key {
+                // Replace if: newer generation, OR (same generation AND deeper/equal depth)
+                let is_newer = self.generation.wrapping_sub(bucket[i].age) > 0;
+                if is_newer || depth >= bucket[i].depth {
+                    bucket[i] = new_entry;
                 }
+                return;
+            }
+            if bucket[i].key == 0 {
+                bucket[i] = new_entry;
+                self.filled_entries.fetch_add(1, Ordering::Relaxed);
                 return;
             }
         }
@@ -175,16 +154,12 @@ impl TranspositionTable {
             }
         }
 
-        // Only replace if new entry is better than worst existing
-        let new_score = new_entry.replacement_score(self.generation);
-        if new_score > worst_score {
-            bucket[worst_idx] = new_entry;
-            self.overwrites.fetch_add(1, Ordering::Relaxed);
-        }
+        bucket[worst_idx] = new_entry;
+        self.overwrites.fetch_add(1, Ordering::Relaxed);
     }
 
     pub fn prune_old_entries(&mut self) {
-        const MAX_AGE_DIFF: u8 = 32;
+        const MAX_AGE_DIFF: u8 = 2;
         let mut pruned = 0u64;
 
         for bucket in self.buckets.iter_mut() {
