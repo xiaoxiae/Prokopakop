@@ -18,6 +18,17 @@ pub const ROOK_VALUE: f32 = 500.0;
 pub const QUEEN_VALUE: f32 = 900.0;
 pub const KING_VALUE: f32 = 0.0;
 
+// Matches order in Pieces so we can quickly calculate game phase
+pub const PIECE_VALUES: [f32; Piece::COUNT + 1] = [
+    0.0,
+    ROOK_VALUE,
+    BISHOP_VALUE,
+    QUEEN_VALUE,
+    KNIGHT_VALUE,
+    0.0,
+    0.0,
+];
+
 // Multipliers for the piece tables
 // (since they're stored normalized)
 pub const PAWN_POSITION_MULTIPLIER: f32 = 50.0;
@@ -214,22 +225,7 @@ pub fn calculate_game_phase(game: &Game) -> f32 {
     const STARTING_MATERIAL: f32 =
         2.0 * QUEEN_VALUE + 4.0 * ROOK_VALUE + 4.0 * BISHOP_VALUE + 4.0 * KNIGHT_VALUE;
 
-    let mut current_material = 0.0;
-
-    // Count all non-pawn, non-king pieces on the board
-    for piece in 0..Piece::COUNT {
-        let piece_type = Piece::from_repr(piece).unwrap();
-
-        if piece_type == Piece::Pawn || piece_type == Piece::King {
-            continue;
-        }
-
-        let piece_value = get_piece_value(piece_type);
-        let piece_count = game.piece_bitboards[piece].count_ones() as f32;
-        current_material += piece_count * piece_value;
-    }
-
-    let material_ratio = current_material / STARTING_MATERIAL;
+    let material_ratio = game.non_pawn_remaining_material / STARTING_MATERIAL;
 
     let phase = 1.0 - material_ratio;
     phase.clamp(0.0, 1.0)

@@ -1,7 +1,7 @@
 use super::pieces::{Color, Piece};
 use crate::game::evaluate::{
-    calculate_game_phase, evaluate_bishop_pair, evaluate_king_safety, evaluate_material,
-    evaluate_mobility, evaluate_positional,
+    PIECE_VALUES, calculate_game_phase, evaluate_bishop_pair, evaluate_king_safety,
+    evaluate_material, evaluate_mobility, evaluate_positional,
 };
 use crate::game::pieces::ColoredPiece;
 use crate::utils::bitboard::{
@@ -276,6 +276,8 @@ pub struct Game {
 
     // store the zobrist key for the current position (computed iteratively)
     pub zobrist_key: u64,
+
+    pub non_pawn_remaining_material: f32,
 }
 
 impl Game {
@@ -296,6 +298,7 @@ impl Game {
             history: vec![],
             zobrist_key: 0,
             all_pieces: Bitboard::default(),
+            non_pawn_remaining_material: 0.0,
         };
 
         let mut y = 0u32;
@@ -475,6 +478,8 @@ impl Game {
             | self.color_bitboards[Color::Black as usize];
 
         self.zobrist_key ^= ZOBRIST_TABLE.pieces[color as usize][piece as usize][square as usize];
+
+        self.non_pawn_remaining_material -= PIECE_VALUES[piece as usize + 1];
     }
 
     fn set_piece(&mut self, square: BoardSquare, colored_piece @ (piece, color): ColoredPiece) {
@@ -489,8 +494,11 @@ impl Game {
             | self.color_bitboards[Color::Black as usize];
 
         self.zobrist_key ^= ZOBRIST_TABLE.pieces[color as usize][piece as usize][square as usize];
+
+        self.non_pawn_remaining_material += PIECE_VALUES[piece as usize + 1];
     }
 
+    // EWW duplication!!!
     fn set_piece_const<P: ConstPiece, C: ConstColor>(&mut self, square: BoardSquare) {
         debug_assert!(self.pieces[square as usize].is_none());
 
@@ -505,6 +513,8 @@ impl Game {
             | self.color_bitboards[Color::Black as usize];
 
         self.zobrist_key ^= ZOBRIST_TABLE.pieces[C::COLOR_INDEX][P::PIECE_INDEX][square as usize];
+
+        self.non_pawn_remaining_material += PIECE_VALUES[P::PIECE_INDEX + 1];
     }
 
     fn update_turn(&mut self, delta: isize) {
