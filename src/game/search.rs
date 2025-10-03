@@ -840,12 +840,35 @@ fn aspiration_search(
         );
     }
 
-    let mut window = 50.0;
+    // Skip aspiration windows for low depths (<=5)
+    if depth <= 4 {
+        return alpha_beta(
+            game,
+            depth,
+            1,
+            -f32::INFINITY,
+            f32::INFINITY,
+            previous_pv,
+            stop_flag,
+            stats,
+            limits,
+            tt,
+            position_history,
+            killer_moves,
+            history_table,
+        );
+    }
+
+    // Exponential narrowing: starting 50 and approaching 25 at higher depths
+    let initial_window = (50.0 * 0.25_f32.powf((depth as f32 - 4.0) / 10.0)).max(25.0);
+
+    let mut alpha = previous_score - initial_window;
+    let mut beta = previous_score + initial_window;
+
+    let mut fail_high_count = 0;
+    let mut fail_low_count = 0;
 
     loop {
-        let alpha = previous_score - window;
-        let beta = previous_score + window;
-
         let result = alpha_beta(
             game,
             depth,
@@ -895,55 +918,91 @@ fn aspiration_search(
         }
 
         if result.evaluation <= alpha {
-            // Fail low - widen window and re-search
-            window *= 2.5;
-            println!(
-                "info string Aspiration fail low at depth {}, widening window to {:.1}",
-                depth, window
-            );
-        } else if result.evaluation >= beta {
-            // Fail high - widen window and re-search
-            window *= 2.5;
-            println!(
-                "info string Aspiration fail high at depth {}, widening window to {:.1}",
-                depth, window
-            );
-        } else {
-            // Success - return the result
-            return result;
-        }
+            fail_low_count += 1;
+            fail_high_count = 0;
 
-        // If window gets too big, fall back to full window search
-        if window > 1000.0 {
-            println!("info string Aspiration window too wide, using full window search");
-            let fallback_result = alpha_beta(
-                game,
-                depth,
-                1,
-                -f32::INFINITY,
-                f32::INFINITY,
-                previous_pv,
-                stop_flag,
-                stats,
-                limits,
-                tt,
-                position_history,
-                killer_moves,
-                history_table,
+            println!(
+                "info string Aspiration fail low at depth {} (attempt {}), widening alpha",
+                depth, fail_low_count
             );
 
-            // If even the fallback search returns empty move, use previous move
-            if fallback_result.best_move == BoardMove::empty()
-                && previous_best_move != BoardMove::empty()
-            {
-                return SearchResult {
-                    best_move: previous_best_move,
-                    evaluation: previous_score,
-                    pv: previous_pv.to_vec(),
-                };
+            if fail_low_count >= 2 {
+                println!("info string Second fail low, switching to full window search");
+                let fallback_result = alpha_beta(
+                    game,
+                    depth,
+                    1,
+                    -f32::INFINITY,
+                    beta,
+                    previous_pv,
+                    stop_flag,
+                    stats,
+                    limits,
+                    tt,
+                    position_history,
+                    killer_moves,
+                    history_table,
+                );
+
+                if fallback_result.best_move == BoardMove::empty()
+                    && previous_best_move != BoardMove::empty()
+                {
+                    return SearchResult {
+                        best_move: previous_best_move,
+                        evaluation: previous_score,
+                        pv: previous_pv.to_vec(),
+                    };
+                }
+
+                return fallback_result;
             }
 
-            return fallback_result;
+            let delta = previous_score - alpha;
+            alpha = previous_score - delta * 2.5;
+        } else if result.evaluation >= beta {
+            fail_high_count += 1;
+            fail_low_count = 0;
+
+            println!(
+                "info string Aspiration fail high at depth {} (attempt {}), widening beta",
+                depth, fail_high_count
+            );
+
+            if fail_high_count >= 2 {
+                println!("info string Second fail high, switching to full window search");
+                let fallback_result = alpha_beta(
+                    game,
+                    depth,
+                    1,
+                    alpha,
+                    f32::INFINITY,
+                    previous_pv,
+                    stop_flag,
+                    stats,
+                    limits,
+                    tt,
+                    position_history,
+                    killer_moves,
+                    history_table,
+                );
+
+                if fallback_result.best_move == BoardMove::empty()
+                    && previous_best_move != BoardMove::empty()
+                {
+                    return SearchResult {
+                        best_move: previous_best_move,
+                        evaluation: previous_score,
+                        pv: previous_pv.to_vec(),
+                    };
+                }
+
+                return fallback_result;
+            }
+
+            let delta = beta - previous_score;
+            beta = previous_score + delta * 2.5;
+        } else {
+            return result;
         }
     }
 }
