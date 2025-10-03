@@ -898,9 +898,8 @@ impl Game {
     }
 
     ///
-    /// Generate a bitboard that contains pseud-legal moves for a particular square,
-    /// ignoring most safety-related rules and using the color of the piece as the
-    /// current turn (i.e. ignoring `this.side`).
+    /// Generate a bitboard that contains pseudo-legal moves for a particular square,
+    /// ignoring most king-safety-related rules.
     ///
     fn get_pseudo_legal_move_bitboard_const<P: ConstPiece, C: ConstColor>(
         &self,
@@ -934,15 +933,6 @@ impl Game {
 
                     valid_moves |= double_forward;
                 }
-            }
-        } else if P::PIECE == Piece::King {
-            // Only add castling if king is not under attack
-            let king_position = self
-                .colored_piece_bitboard_const::<ConstKing, C>()
-                .next_index();
-
-            if !self.is_square_attacked_const::<C::Opponent>(king_position) {
-                valid_moves |= self.get_castling_bitboard_const::<C>();
             }
         }
 
@@ -1346,7 +1336,12 @@ impl Game {
             });
 
             // for king, just don't move into an attack
-            let bitboard = self.get_pseudo_legal_move_bitboard_const::<ConstKing, C>(king_position);
+            let mut bitboard =
+                self.get_pseudo_legal_move_bitboard_const::<ConstKing, C>(king_position);
+
+            // we can also castle!
+            bitboard |= self.get_castling_bitboard_const::<C>();
+
             for target in bitboard.iter_positions() {
                 if !self.is_square_attacked_const::<C::Opponent>(target) {
                     moves[move_count] = BoardMove::regular(king_position, target);
@@ -1536,10 +1531,6 @@ impl Game {
             Color::White => self.get_pseudo_legal_moves_const::<ConstWhite>(),
             Color::Black => self.get_pseudo_legal_moves_const::<ConstBlack>(),
         }
-    }
-
-    pub(crate) fn get_pseudo_legal_moves(&self) -> (usize, [BoardMove; 256]) {
-        return self.get_side_pseudo_legal_moves(self.side);
     }
 
     fn get_pseudo_legal_moves_const<C: ConstColor>(&self) -> (usize, [BoardMove; 256]) {
