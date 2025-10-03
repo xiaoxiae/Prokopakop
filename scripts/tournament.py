@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 from pathlib import Path
+import shlex
 
 COMMIT_NAMES = [
     # "6aec863",  # functional alpha/beta + iterative deepening + material eval with position tables
@@ -18,13 +19,13 @@ COMMIT_NAMES = [
     # "ff14c29",  # faster eval
     # "7ff40fc",  # threefold repetition detection
     # "ab3fdc8",  # passed / doubled pawns
-    "6c4e7ee",  # piece mobility
+    # "6c4e7ee",  # piece mobility
     # "a28d291",  # delta pruning for quiescence search
     # "2c1a839",  # killer moves
     # "fed61d5",  # fast passed pawn eval
     # "10c64e9",  # null move pruning
     # "5047857",  # late move reduction
-    "93743a2",  # bishop pair + faster move generation
+    # "93743a2",  # bishop pair + faster move generation
     # "a56e0f7",  # better piece tables + isolated pawns
     # "1fb64eb",  # LMR bugfix
     # "7cfbb74",  # PV search
@@ -35,8 +36,9 @@ COMMIT_NAMES = [
     "075f411",  # actually, no pseudo-legal move generation
     # "7490eba",  # futility pruning
     "8024a6e",  # no partial result usage + better iterative deepening time management
-    "c144fb9",  # no TT cleaning between moves
+    # "c144fb9",  # no TT cleaning between moves
     "5cc228e",  # king safety
+    "910fb21",  # DP + NMP tuning
 ]
 
 MASTER_OPTIONS = {
@@ -147,7 +149,11 @@ def build_fastchess_command(commit_names, add_master=False, last_n=None):
         "-openings", "file=data/book.pgn", "format=pgn", "plies=8", "order=random",
     ])
 
-    return cmd
+    # Wrap command with grep filter to remove noisy lines
+    cmd_str = " ".join(shlex.quote(arg) for arg in cmd)
+    filtered_cmd = f"{cmd_str} | grep -Ev '^(Moves|Info|Warning|Position);'"
+
+    return ["bash", "-c", filtered_cmd]
 
 
 def run_fastchess(commit_names, add_master=False, last_n=None):
