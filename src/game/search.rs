@@ -8,7 +8,7 @@ use std::time::Instant;
 use fxhash::FxHashMap;
 
 use crate::game::board::{BoardMove, BoardMoveExt, Game};
-use crate::game::evaluate::{CHECKMATE_SCORE, QUEEN_VALUE, calculate_game_phase, get_piece_value};
+use crate::game::evaluate::{CHECKMATE_SCORE, QUEEN_VALUE, get_piece_value};
 use crate::game::history::HistoryTable;
 use crate::game::killer::KillerMoves;
 use crate::game::opening_book::OpeningBook;
@@ -485,13 +485,11 @@ fn alpha_beta(
 
     // Null move pruning (skip in PV nodes)
     // Don't try null move if we're way below beta
-    // Also don't do this in king and pawn endgames
     if !is_pv_node
         && depth >= 3
         && !in_check
         && beta.abs() < CHECKMATE_SCORE - 1000.0
-        && static_eval >= beta
-        && game.non_pawn_remaining_material != 0.0
+        && static_eval >= beta - 100.0
     {
         game.make_null_move();
 
@@ -995,8 +993,6 @@ fn quiescence_search(
         }
     }
 
-    let game_phase = calculate_game_phase(game);
-
     // Filter to only captures (and optionally checks) with delta pruning
     let mut capture_moves = Vec::new();
     for i in 0..move_count {
@@ -1004,12 +1000,11 @@ fn quiescence_search(
 
         if game.is_capture(board_move) || game.is_check(board_move) {
             // Apply delta pruning for captures only (not for checks)
-            // Don't do this for endgames though since we might miss stuff
-            if game_phase < 0.7 && game.is_capture(board_move) {
+            if game.is_capture(board_move) {
                 let max_gain = calculate_delta_margin(game, &board_move);
 
                 // Delta pruning: if even the best possible outcome can't improve alpha,
-                // skip this move; margin is about half a pawn (we're aggressive)
+                // skip this move; margin is about a pawn
                 if stand_pat + max_gain + get_piece_value(Piece::Pawn) / 2.0 < alpha {
                     continue;
                 }
