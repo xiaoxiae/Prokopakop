@@ -1061,7 +1061,8 @@ fn quiescence_search(
     for i in 0..move_count {
         let board_move = moves[i];
 
-        if game.is_capture(board_move) || game.is_check(board_move) {
+        // Only extend checks for the first ply, since the check is super expensive
+        if game.is_capture(board_move) || (ply <= 1 && game.is_check(board_move)) {
             // Apply delta pruning for captures only (not for checks)
             // Don't do this for endgames though since we might miss stuff
             if game_phase < 0.7 && game.is_capture(board_move) {
