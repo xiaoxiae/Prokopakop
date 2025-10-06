@@ -483,6 +483,33 @@ fn alpha_beta(
         }
     }
 
+    // Razoring - drop into quiescence when evaluation is far below alpha at low depths
+    // Only apply after we've searched a reasonable depth (ply > 6) and at frontier nodes
+    if !is_pv_node
+        && !in_check
+        && depth <= 3
+        && depth >= 1
+        && ply > 6
+        && alpha.abs() < CHECKMATE_SCORE - 1000.0
+    {
+        let razoring_margin = match depth {
+            1 => 300.0,
+            2 => 450.0,
+            3 => 600.0,
+            _ => 0.0,
+        };
+
+        if static_eval + razoring_margin < alpha {
+            // Do a quiescence search to verify the position is really bad
+            let q_result = quiescence_search(game, ply, alpha, beta, stop_flag, stats, limits);
+
+            // If quiescence confirms we're below alpha, return early
+            if q_result.evaluation < alpha {
+                return q_result;
+            }
+        }
+    }
+
     // Null move pruning (skip in PV nodes)
     // Don't try null move if we're way below beta
     // Also don't do this in king and pawn endgames
