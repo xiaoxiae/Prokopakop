@@ -19,7 +19,7 @@ pub const QUEEN_VALUE: f32 = 900.0;
 pub const KING_VALUE: f32 = 0.0;
 
 // Matches order in Pieces so we can quickly calculate game phase
-pub const PIECE_VALUES: [f32; Piece::COUNT + 1] = [
+pub const MINOR_MAJOR_PIECE_VALUES: [f32; Piece::COUNT + 1] = [
     0.0,
     ROOK_VALUE,
     BISHOP_VALUE,
@@ -27,6 +27,17 @@ pub const PIECE_VALUES: [f32; Piece::COUNT + 1] = [
     KNIGHT_VALUE,
     0.0,
     0.0,
+];
+
+// Matches order in Pieces so we can quickly calculate game phase
+pub const PIECE_VALUES: [f32; Piece::COUNT + 1] = [
+    0.0,
+    ROOK_VALUE,
+    BISHOP_VALUE,
+    QUEEN_VALUE,
+    KNIGHT_VALUE,
+    PAWN_VALUE,
+    10000.0,
 ];
 
 // Multipliers for the piece tables

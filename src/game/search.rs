@@ -1061,6 +1061,15 @@ fn quiescence_search(
     for i in 0..move_count {
         let board_move = moves[i];
 
+        // SEE pruning: skip captures that lose material
+        // Don't apply to checks since they might have tactical value
+        if game.is_capture(board_move) {
+            let see_value = game.see(board_move.get_to());
+            if see_value < 0.0 {
+                continue;
+            }
+        }
+
         // Only extend checks for the first ply, since the check is super expensive
         if game.is_capture(board_move) || (ply <= 1 && game.is_check(board_move)) {
             // Apply delta pruning for captures only (not for checks)
@@ -1142,13 +1151,19 @@ fn order_moves_with_heuristics(
         } else if Some(mv) == tt_move {
             -900_000
         } else if game.is_capture(mv) {
-            -800_000 - mvv_lva_score(game, &mv)
+            let see = game.see_sign(mv.get_to());
+
+            if see > 0 {
+                -800_000 - mvv_lva_score(game, &mv)
+            } else {
+                -400_000 - mvv_lva_score(game, &mv)
+            }
         } else if mv == killer_moves[0] {
             -700_000
         } else if mv == killer_moves[1] {
             -600_000
         } else {
-            -history_table.get_history_score(&mv)
+            -500_000 - history_table.get_history_score(&mv)
         }
     });
 }

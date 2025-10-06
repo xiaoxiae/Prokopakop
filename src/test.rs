@@ -422,3 +422,143 @@ mod tests {
         Ok(positions)
     }
 }
+
+#[cfg(test)]
+mod see_tests {
+    use crate::{
+        GameController,
+        game::evaluate::{BISHOP_VALUE, KNIGHT_VALUE, PAWN_VALUE, QUEEN_VALUE, ROOK_VALUE},
+        utils::square::BoardSquare,
+    };
+
+    fn test_see_position(fen: &str, square: &str, expected_score: f32) {
+        let mut controller = GameController::new();
+        controller.set_board_from_fen(fen);
+
+        let square_idx = parse_square(square);
+        let actual_score = controller.game.see(square_idx);
+        let actual_sign = controller.game.see_sign(square_idx);
+
+        assert_eq!(
+            actual_score, expected_score,
+            "SEE failed for position '{}' on square {}: expected {}, got {}",
+            fen, square, expected_score, actual_score
+        );
+
+        assert_eq!(
+            actual_sign,
+            expected_score.signum() as i8,
+            "SEE sign failed for position '{}' on square {}: expected {}, got {}",
+            fen,
+            square,
+            expected_score.signum(),
+            actual_sign
+        );
+    }
+
+    fn parse_square(square: &str) -> BoardSquare {
+        let bytes = square.as_bytes();
+        let file = (bytes[0] - b'a') as usize;
+        let rank = (bytes[1] - b'1') as usize;
+        (rank * 8 + file) as BoardSquare
+    }
+
+    #[test]
+    fn test_see_simple_winning_captures() {
+        // Pawn takes queen
+        test_see_position("8/1n5q/8/4q3/3P4/6PP/8/4K2k w - - 0 1", "e5", QUEEN_VALUE);
+
+        // Knight takes rook
+        test_see_position("8/8/8/4r3/8/5N2/8/4K2k w - - 0 1", "e5", ROOK_VALUE);
+
+        // Bishop takes knight
+        test_see_position("8/8/8/4n3/8/2B5/8/4K2k w - - 0 1", "e5", KNIGHT_VALUE);
+    }
+
+    #[test]
+    fn test_see_winning_captures() {
+        // Pawn takes rook, pawn takes pawn
+        test_see_position(
+            "8/8/3p1p2/4n3/3P4/8/8/4K2k w - - 0 1",
+            "e5",
+            KNIGHT_VALUE - PAWN_VALUE,
+        );
+    }
+
+    #[test]
+    fn test_see_equal_trades() {
+        // Queen-queen-knight
+        test_see_position("8/5n2/8/4q3/8/2Q5/8/4K2k w - - 0 1", "e5", 0.0);
+
+        // Rook-rook-pawn
+        test_see_position("8/8/5p2/R3r3/8/8/8/4K2k w - - 0 1", "e5", 0.0);
+    }
+
+    #[test]
+    fn test_see_losing_captures() {
+        // Queen takes pawn (defended by pawn)
+        test_see_position(
+            "8/8/3p4/4p3/8/8/4Q3/4K2k w - - 0 1",
+            "e5",
+            -QUEEN_VALUE + PAWN_VALUE,
+        );
+
+        // Rook takes pawn (defended by knight)
+        test_see_position(
+            "8/8/4p3/6n1/8/8/4R3/4K2k w - - 0 1",
+            "e6",
+            -ROOK_VALUE + PAWN_VALUE,
+        );
+
+        // Knight takes pawn (defended by pawn)
+        test_see_position(
+            "8/8/3p4/4p3/8/5N2/8/4K2k w - - 0 1",
+            "e5",
+            -KNIGHT_VALUE + PAWN_VALUE,
+        );
+    }
+    #[test]
+    fn test_see_complex_exchanges() {
+        // Pawn should take knight and that's it
+        test_see_position(
+            "4r3/3p4/4n3/3P4/8/4Q3/8/4K3 w - - 0 1",
+            "e6",
+            KNIGHT_VALUE - PAWN_VALUE,
+        );
+
+        // This is a bit counter intuitive, but once we take the knight, if the opponent were to continue,
+        // they would lose more, so they don't even recapture
+        test_see_position(
+            "4r3/3p4/4n3/3P2N1/8/4Q3/8/4K3 w - - 0 1",
+            "e6",
+            KNIGHT_VALUE,
+        );
+    }
+
+    #[test]
+    fn test_see_xray_attacks() {
+        test_see_position(
+            "8/3p4/4r3/8/2B5/1B6/8/4K2k w - - 0 1",
+            "e6",
+            ROOK_VALUE + PAWN_VALUE - BISHOP_VALUE,
+        );
+    }
+
+    #[test]
+    fn test_king_recapture() {
+        test_see_position(
+            "8/4r3/8/8/1R2q3/4K3/8/7k w - - 0 1",
+            "e4",
+            ROOK_VALUE + QUEEN_VALUE - ROOK_VALUE,
+        );
+    }
+
+    #[test]
+    fn test_king_no_recapture() {
+        test_see_position(
+            "8/8/3p1p2/4n3/3P1K2/8/8/7k w - - 0 1",
+            "e5",
+            KNIGHT_VALUE - PAWN_VALUE,
+        );
+    }
+}
