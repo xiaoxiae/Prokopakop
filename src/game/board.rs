@@ -1,7 +1,7 @@
 use super::pieces::{Color, Piece};
 use crate::game::evaluate::{
-    PIECE_VALUES, calculate_game_phase, evaluate_bishop_pair, evaluate_king_safety,
-    evaluate_material, evaluate_mobility, evaluate_positional,
+    MINOR_MAJOR_PIECE_VALUES, PIECE_VALUES, calculate_game_phase, evaluate_bishop_pair,
+    evaluate_king_safety, evaluate_material, evaluate_mobility, evaluate_positional,
 };
 use crate::game::pieces::ColoredPiece;
 use crate::utils::bitboard::{
@@ -277,6 +277,7 @@ pub struct Game {
     // store the zobrist key for the current position (computed iteratively)
     pub zobrist_key: u64,
 
+    // stuff for making eval simpler
     pub non_pawn_remaining_material: f32,
 }
 
@@ -479,7 +480,7 @@ impl Game {
 
         self.zobrist_key ^= ZOBRIST_TABLE.pieces[color as usize][piece as usize][square as usize];
 
-        self.non_pawn_remaining_material -= PIECE_VALUES[piece as usize + 1];
+        self.non_pawn_remaining_material -= MINOR_MAJOR_PIECE_VALUES[piece as usize + 1];
     }
 
     fn set_piece(&mut self, square: BoardSquare, colored_piece @ (piece, color): ColoredPiece) {
@@ -495,7 +496,7 @@ impl Game {
 
         self.zobrist_key ^= ZOBRIST_TABLE.pieces[color as usize][piece as usize][square as usize];
 
-        self.non_pawn_remaining_material += PIECE_VALUES[piece as usize + 1];
+        self.non_pawn_remaining_material += MINOR_MAJOR_PIECE_VALUES[piece as usize + 1];
     }
 
     // EWW duplication!!!
@@ -514,7 +515,7 @@ impl Game {
 
         self.zobrist_key ^= ZOBRIST_TABLE.pieces[C::COLOR_INDEX][P::PIECE_INDEX][square as usize];
 
-        self.non_pawn_remaining_material += PIECE_VALUES[P::PIECE_INDEX + 1];
+        self.non_pawn_remaining_material += MINOR_MAJOR_PIECE_VALUES[P::PIECE_INDEX + 1];
     }
 
     fn update_turn(&mut self, delta: isize) {
@@ -834,6 +835,15 @@ impl Game {
 
             valid_moves
         }
+    }
+
+    fn get_piece_attack_bitboard(
+        &self,
+        piece: Piece,
+        color: Color,
+        square: BoardSquare,
+    ) -> Bitboard {
+        dispatch_piece_color!(piece, color, get_piece_attack_bitboard_const, self, square)
     }
 
     ///
@@ -1600,34 +1610,159 @@ impl Game {
         }
     }
 
-    pub(crate) fn get_attacked_from(&self, square: BoardSquare, color: Color) -> Bitboard {
-        match color {
-            Color::White => self.get_attacked_from_const::<ConstBlack>(square),
-            Color::Black => self.get_attacked_from_const::<ConstWhite>(square),
-        }
-    }
+    pub fn see_sign(&self, square: BoardSquare) -> i8 {
+        // Returns: 1 = winning, 0 = even, -1 = losing
 
-    pub(crate) fn get_king_attacks(&self, color: Color) -> Bitboard {
-        match color {
-            Color::White => self.get_attacked_from_const::<ConstBlack>(
-                self.get_king_position_const::<ConstWhite>(),
-            ),
-            Color::Black => self.get_attacked_from_const::<ConstWhite>(
-                self.get_king_position_const::<ConstBlack>(),
-            ),
-        }
-    }
-
-    pub(crate) fn get_king_visibility(&self, color: Color) -> Bitboard {
-        return match color {
-            Color::White => self.get_occlusion_bitmap_const::<ConstQueen>(
-                self.get_king_position_const::<ConstWhite>(),
-                self.all_pieces,
-            ),
-            Color::Black => self.get_occlusion_bitmap_const::<ConstQueen>(
-                self.get_king_position_const::<ConstBlack>(),
-                self.all_pieces,
-            ),
+        let target_piece = match self.pieces[square as usize] {
+            Some((piece, _)) => piece,
+            None => return 0,
         };
+
+        let mut balance = PIECE_VALUES[target_piece as usize + 1];
+        let mut occupied = self.all_pieces;
+        let mut side = self.side;
+        let mut last_captured = PIECE_VALUES[target_piece as usize + 1];
+
+        loop {
+            let attacker_sq = match self.get_smallest_attacker(square, side, occupied) {
+                Some(sq) => sq,
+                None => break,
+            };
+
+            let (attacker_piece, _) = self.pieces[attacker_sq as usize].unwrap();
+            let attacker_value = PIECE_VALUES[attacker_piece as usize + 1];
+
+            if side == self.side {
+                balance += last_captured;
+                // Early exit: we're already winning more than they can recapture
+                if balance >= attacker_value {
+                    return 1;
+                }
+            } else {
+                balance -= last_captured;
+                // Early exit: we're losing and they can keep taking
+                if balance <= -attacker_value {
+                    return -1;
+                }
+            }
+
+            occupied &= !attacker_sq.to_mask();
+            last_captured = attacker_value;
+            side = !side;
+        }
+
+        if balance > 0.0 {
+            1
+        } else if balance < 0.0 {
+            -1
+        } else {
+            0
+        }
+    }
+
+    /// Static Exchange Evaluation - evaluates the expected material outcome
+    /// of captures on a given square, starting with current player.
+    pub(crate) fn see(&self, square: BoardSquare) -> f32 {
+        let target_piece = match self.pieces[square as usize] {
+            Some((piece, _)) => piece,
+            None => return 0.0,
+        };
+
+        let mut gains = [0.0f32; 16];
+        let mut depth = 1;
+
+        let mut occupied = self.all_pieces;
+        let mut side = self.side;
+        let mut captured_value = PIECE_VALUES[target_piece as usize + 1];
+
+        // Simulate exchange
+        loop {
+            // Find smallest attacker for current side
+            let attacker_sq = match self.get_smallest_attacker(square, side, occupied) {
+                Some(sq) => sq,
+                None => break,
+            };
+
+            let (attacker_piece, _) = self.pieces[attacker_sq as usize].unwrap();
+
+            // Store what we're capturing
+            gains[depth] = captured_value;
+
+            // Update for next iteration
+            occupied &= !attacker_sq.to_mask();
+            captured_value = PIECE_VALUES[attacker_piece as usize + 1];
+            side = !side;
+            depth += 1;
+
+            if depth >= 16 {
+                break;
+            }
+        }
+
+        // Minimax: each side chooses stop vs continue
+        while depth > 1 {
+            depth -= 1;
+            gains[depth] -= gains[depth + 1].max(0.0);
+        }
+
+        gains[1]
+    }
+
+    /// Find the smallest attacker of a given square for a given side
+    /// Uses a modified occupancy bitboard to simulate captures
+    fn get_smallest_attacker(
+        &self,
+        square: BoardSquare,
+        side: Color,
+        occupied: Bitboard,
+    ) -> Option<BoardSquare> {
+        let possible_attacker_positions = occupied & self.color_bitboards[side as usize];
+
+        let pawn_attackers = self.piece_bitboards[Piece::Pawn as usize]
+            & possible_attacker_positions
+            & self.get_piece_attack_bitboard(Piece::Pawn, !side, square);
+        if pawn_attackers != 0 {
+            return Some(pawn_attackers.next_index());
+        }
+
+        let knight_attackers = self.piece_bitboards[Piece::Knight as usize]
+            & possible_attacker_positions
+            & self.get_piece_attack_bitboard(Piece::Knight, side, square);
+        if knight_attackers != 0 {
+            return Some(knight_attackers.next_index());
+        }
+
+        // Bishops
+        let bishop_attackers = self.piece_bitboards[Piece::Bishop as usize]
+            & possible_attacker_positions
+            & self.get_occlusion_bitmap_const::<ConstBishop>(square, occupied);
+        if bishop_attackers != 0 {
+            return Some(bishop_attackers.next_index());
+        }
+
+        // Rooks
+        let rook_attackers = self.piece_bitboards[Piece::Rook as usize]
+            & possible_attacker_positions
+            & self.get_occlusion_bitmap_const::<ConstRook>(square, occupied);
+        if rook_attackers != 0 {
+            return Some(rook_attackers.next_index());
+        }
+
+        // Queens
+        let queen_attackers = self.piece_bitboards[Piece::Queen as usize]
+            & possible_attacker_positions
+            & self.get_occlusion_bitmap_const::<ConstQueen>(square, occupied);
+        if queen_attackers != 0 {
+            return Some(queen_attackers.next_index());
+        }
+
+        let king_attackers = self.piece_bitboards[Piece::King as usize]
+            & possible_attacker_positions
+            & self.get_piece_attack_bitboard(Piece::King, side, square);
+        if king_attackers != 0 {
+            return Some(king_attackers.next_index());
+        }
+
+        None
     }
 }
