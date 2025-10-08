@@ -11,7 +11,6 @@ use crate::game::board::{BoardMove, BoardMoveExt, Game};
 use crate::game::evaluate::{CHECKMATE_SCORE, QUEEN_VALUE, calculate_game_phase, get_piece_value};
 use crate::game::history::HistoryTable;
 use crate::game::killer::KillerMoves;
-use crate::game::opening_book::OpeningBook;
 use crate::game::pieces::{Color, Piece};
 use crate::game::table::{NodeType, TranspositionTable};
 
@@ -263,29 +262,11 @@ pub fn iterative_deepening(
     stop_flag: Arc<AtomicBool>,
     tt: &mut TranspositionTable,
     position_history: &mut PositionHistory,
-    opening_book: Option<&OpeningBook>,
 ) -> SearchResult {
     let mut stats = SearchStats::new();
     let mut best_completed_result = SearchResult::leaf(0.0);
     let mut previous_pv: Vec<BoardMove> = Vec::new();
     let mut last_iteration_ms = 0u64;
-
-    // Check opening book first
-    if let Some(book) = opening_book {
-        if let Some(best_move) = book.get_best_move(game.zobrist_key) {
-            println!("info string Using opening book move");
-
-            // Use a neutral evaluation since opening book moves don't have evaluations
-            let pv = vec![best_move];
-            print_uci_info(1, 0.0, &pv, &stats, tt, game.side);
-
-            return SearchResult {
-                best_move,
-                evaluation: 0.0,
-                pv,
-            };
-        }
-    }
 
     // If only one move is available, return it immediately
     let (count, moves) = game.get_moves();
@@ -420,7 +401,7 @@ fn alpha_beta(
         return SearchResult::leaf(0.0);
     }
 
-    if ply > 1 && ply <= 3 {
+    if ply > 1 && ply <= 6 {
         if position_history.is_threefold_repetition(zobrist_key) {
             return SearchResult::leaf(0.0);
         }

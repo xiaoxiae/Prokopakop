@@ -21,12 +21,14 @@ A moderately fast UCI chess engine written in Rust that **kops the Prokop**.
 
 - **[Alpha-Beta](https://www.chessprogramming.org/Alpha-Beta)** via **[Negamax](https://www.chessprogramming.org/Negamax)** with **[PV-Search](https://www.chessprogramming.org/Principal_Variation_Search)**
 - **[Iterative Deepening](https://www.chessprogramming.org/Iterative_Deepening)** with [Aspiration Windows](https://www.chessprogramming.org/Aspiration_Windows)
-- **[Move Ordering](https://www.chessprogramming.org/Move_Ordering)** - PV moves, hash moves, [MVV-LVA](https://www.chessprogramming.org/MVV-LVA), [killer moves](https://www.chessprogramming.org/Killer_Heuristic), [history heuristic](https://www.chessprogramming.org/History_Heuristic)
+- **[Move Ordering](https://www.chessprogramming.org/Move_Ordering)** - PV moves, hash moves, [MVV-LVA](https://www.chessprogramming.org/MVV-LVA), [SEE](https://www.chessprogramming.org/Static_Exchange_Evaluation), [killer moves](https://www.chessprogramming.org/Killer_Heuristic), [history heuristic](https://www.chessprogramming.org/History_Heuristic)
 - **[Quiescence Search](https://www.chessprogramming.org/Quiescence_Search)** with [Delta Pruning](https://www.chessprogramming.org/Delta_Pruning)
 - **[Transposition Table](https://www.chessprogramming.org/Transposition_Table)**
 - **[Null Move Pruning](https://www.chessprogramming.org/Null_Move_Pruning)**
 - **[Late Move Reduction](https://www.chessprogramming.org/Late_Move_Reductions)**
 - **[Futility Pruning](https://www.chessprogramming.org/Futility_Pruning)** (forward + reverse)
+- **[Razoring](https://www.chessprogramming.org/Razoring)**
+- **[SEE Pruning](https://www.chessprogramming.org/Static_Exchange_Evaluation)**
 - **[Quiet Move Pruning](https://www.chessprogramming.org/Futility_Pruning#Quiet_Move_Pruning)**
 
 ### Evaluation
