@@ -3,7 +3,6 @@ mod tests {
     use crate::GameController;
     use rayon::iter::IntoParallelRefIterator;
     use rayon::iter::ParallelIterator;
-    use std::collections::HashMap;
     use std::fs;
 
     #[test]
@@ -61,6 +60,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(debug_assertions))]
     fn test_zobrist_consistency_recursive(
         controller: &mut GameController,
         depth: usize,
@@ -177,6 +177,7 @@ mod tests {
         );
     }
 
+    #[cfg(not(debug_assertions))]
     fn test_transpositions_recursive(
         controller: &mut GameController,
         depth: usize,

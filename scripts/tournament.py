@@ -28,17 +28,20 @@ COMMIT_NAMES = [
     # "93743a2",  # bishop pair + faster move generation
     # "a56e0f7",  # better piece tables + isolated pawns
     # "1fb64eb",  # LMR bugfix
+    # "da6dbb0",  # aspiration windows
     # "7cfbb74",  # PV search
     # "5ddad41",  # bucket TT
     # "6e3bad1",  # history heuristic
     # "c14002b",  # pseudo-legal move generation
-    # "e6662f0",  # LMR bug
-    "075f411",  # actually, no pseudo-legal move generation
+    "e6662f0",  # LMR bug
+    # "075f411",  # actually, no pseudo-legal move generation
     # "7490eba",  # futility pruning
     "8024a6e",  # no partial result usage + better iterative deepening time management
-    # "c144fb9",  # no TT cleaning between moves
+    "c144fb9",  # no TT cleaning between moves
     "5cc228e",  # king safety
     "910fb21",  # DP + NMP tuning
+    "c056f9b",  # SEE
+    "9119428",  # razoring
 ]
 
 MASTER_OPTIONS = {
@@ -142,11 +145,11 @@ def build_fastchess_command(commit_names, add_master=False, last_n=None):
 
     # Add common parameters
     cmd.extend([
-        "-each", "tc=10+0.1", "restart=on",
-        "-rounds", "200",
+        "-each", "tc=5+0.1", "restart=on",
+        "-rounds", "100",
         "-concurrency", "32",
         "-config", "outname=scripts/tournament_results.json",
-        "-openings", "file=data/book.pgn", "format=pgn", "plies=8", "order=random",
+        "-openings", "file=data/book.pgn", "format=pgn", "plies=6", "order=random",
     ])
 
     # Wrap command with grep filter to remove noisy lines

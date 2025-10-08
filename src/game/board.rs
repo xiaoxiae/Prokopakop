@@ -1520,22 +1520,6 @@ impl Game {
         self.halfmoves_since_capture >= 100
     }
 
-    /// Play through a sequence of moves and record the zobrist hash after each move
-    pub fn record_position_sequence(&mut self, moves: &[BoardMove]) -> Vec<(u64, BoardMove)> {
-        let mut positions = Vec::new();
-
-        for &board_move in moves {
-            // Record the position before making the move
-            let zobrist_key = self.zobrist_key;
-            positions.push((zobrist_key, board_move));
-
-            // Make the move
-            self.make_move(board_move);
-        }
-
-        positions
-    }
-
     pub(crate) fn get_side_pseudo_legal_moves(&self, color: Color) -> (usize, [BoardMove; 256]) {
         match color {
             Color::White => self.get_pseudo_legal_moves_const::<ConstWhite>(),

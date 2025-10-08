@@ -3,7 +3,6 @@ use crate::game::evaluate::{
     calculate_game_phase, calculate_king_safety, evaluate_bishop_pair, evaluate_material,
     evaluate_mobility, evaluate_positional,
 };
-use crate::game::opening_book::OpeningBook;
 use crate::game::pieces::Color;
 use crate::game::search::{PositionHistory, SearchLimits, iterative_deepening};
 use crate::game::table::TranspositionTable;
@@ -38,7 +37,6 @@ pub struct GameController {
     pub hash_table_size: usize,
     pub move_overhead: u64,
     pub threads: u64,
-    pub opening_book: Option<OpeningBook>,
     position_history: PositionHistory,
     initialized: bool,
     search_thread: Option<JoinHandle<BoardMove>>,
@@ -223,30 +221,12 @@ impl GameController {
             hash_table_size: 128,
             move_overhead: 10,
             threads: 1,
-            opening_book: None,
             position_history: PositionHistory::new(),
             initialized: false,
             search_thread: None,
             stop_flag: Arc::new(AtomicBool::new(false)),
             tt: Arc::new(Mutex::new(TranspositionTable::new(128))),
             used_jokes: vec![false; JOKES.len()],
-        }
-    }
-
-    pub fn load_opening_book(&mut self, path: &str) -> Result<(), std::io::Error> {
-        match OpeningBook::load_from_file(path) {
-            Ok(book) => {
-                println!(
-                    "info string Opening book loaded: {} positions",
-                    book.position_count()
-                );
-                self.opening_book = Some(book);
-                Ok(())
-            }
-            Err(e) => {
-                eprintln!("info string Failed to load opening book: {}", e);
-                Err(e)
-            }
         }
     }
 
@@ -343,16 +323,6 @@ impl GameController {
                     );
                 }
             },
-            "ownbook" => {
-                if value.trim().is_empty() || value == "<empty>" {
-                    self.opening_book = None;
-                    println!("info string Opening book disabled");
-                } else {
-                    if let Err(_) = self.load_opening_book(value) {
-                        eprintln!("info string Failed to load opening book from: {}", value);
-                    }
-                }
-            }
             _ => {
                 eprintln!("Unknown option: {}", name);
             }
@@ -476,7 +446,6 @@ impl GameController {
         let mut game_clone = self.game.clone();
         let mut position_history_clone = self.position_history.clone();
         let stop_flag = Arc::clone(&self.stop_flag);
-        let opening_book = self.opening_book.clone();
         let move_overhead = self.move_overhead;
 
         // Clone the shared transposition table reference
@@ -499,7 +468,6 @@ impl GameController {
                         stop_flag,
                         &mut *tt_guard,
                         &mut position_history_clone,
-                        opening_book.as_ref(),
                     )
                 } else {
                     unreachable!();

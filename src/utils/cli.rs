@@ -35,19 +35,7 @@ impl GUICommand {
                 GUICommand::MovePosition(Some(moves.iter().map(|m| m.to_string()).collect()))
             }
             ["position", "fen", fen @ ..] if !fen.is_empty() => {
-                // Handle FEN positions that might have moves after them
-                if let Some(moves_idx) = fen.iter().position(|&part| part == "moves") {
-                    let fen_string = fen[..moves_idx].join(" ");
-
-                    let moves = fen[moves_idx + 1..]
-                        .iter()
-                        .map(|m| m.to_string())
-                        .collect::<Vec<String>>();
-
-                    GUICommand::FenPosition(fen_string)
-                } else {
-                    GUICommand::FenPosition(fen.join(" "))
-                }
+                GUICommand::FenPosition(fen.join(" "))
             }
             ["setoption", "name", name_and_rest @ ..] if !name_and_rest.is_empty() => {
                 Self::parse_setoption(name_and_rest)
