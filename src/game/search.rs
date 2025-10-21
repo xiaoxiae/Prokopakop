@@ -71,6 +71,7 @@ pub struct SearchLimits {
     pub max_time_ms: Option<u64>,
     pub moves: Vec<BoardMove>, // TODO: implement this!
     pub infinite: bool,
+    pub exact: bool, // Whether to actually seach for this amount (even for forced moves)
 }
 
 pub struct SearchStats {
@@ -262,6 +263,7 @@ pub fn iterative_deepening(
     stop_flag: Arc<AtomicBool>,
     tt: &mut TranspositionTable,
     position_history: &mut PositionHistory,
+    uci_info: bool,
 ) -> SearchResult {
     let mut stats = SearchStats::new();
     let mut best_completed_result = SearchResult::leaf(0.0);
@@ -271,10 +273,12 @@ pub fn iterative_deepening(
     // If only one move is available, return it immediately
     let (count, moves) = game.get_moves();
 
-    if count == 1 {
+    if count == 1 && !limits.exact {
         let best_move = moves[0];
         let pv = vec![best_move];
-        print_uci_info(1, 0.0, &pv, &stats, tt, game.side);
+        if uci_info {
+            print_uci_info(1, 0.0, &pv, &stats, tt, game.side);
+        }
 
         return SearchResult {
             best_move,
@@ -294,10 +298,12 @@ pub fn iterative_deepening(
         // Check if we have enough time for this iteration (skip for first few depths)
         if depth > 3 && last_iteration_ms > 0 {
             if !stats.has_time_for_iteration(&limits, last_iteration_ms) {
-                println!(
-                    "info string Skipping depth {} due to time constraints",
-                    depth
-                );
+                if uci_info {
+                    println!(
+                        "info string Skipping depth {} due to time constraints",
+                        depth
+                    );
+                }
                 break;
             }
         }
@@ -319,6 +325,7 @@ pub fn iterative_deepening(
                 position_history,
                 &mut killer_moves,
                 &mut history_table,
+                uci_info,
             )
         } else {
             alpha_beta(
@@ -340,7 +347,9 @@ pub fn iterative_deepening(
 
         // Only accept the result if it's valid (not interrupted)
         if result.is_valid() && !stats.should_stop(&limits, &stop_flag) {
-            print_uci_info(depth, result.evaluation, &result.pv, &stats, tt, game.side);
+            if uci_info {
+                print_uci_info(depth, result.evaluation, &result.pv, &stats, tt, game.side);
+            }
             best_completed_result = result.clone();
             previous_pv = result.pv;
             last_iteration_ms = iteration_start.elapsed().as_millis() as u64;
@@ -351,7 +360,9 @@ pub fn iterative_deepening(
             }
         } else {
             // Search was interrupted, don't update best_completed_result
-            println!("info string Search interrupted at depth {}", depth);
+            if uci_info {
+                println!("info string Search interrupted at depth {}", depth);
+            }
             break;
         }
     }
@@ -830,6 +841,7 @@ fn aspiration_search(
     position_history: &mut PositionHistory,
     killer_moves: &mut KillerMoves,
     history_table: &mut HistoryTable,
+    uci_info: bool,
 ) -> SearchResult {
     // Don't use aspiration windows for checkmate scores
     if previous_score.abs() > CHECKMATE_SCORE - 1000.0 {
@@ -931,19 +943,23 @@ fn aspiration_search(
             fail_low_count += 1;
             fail_high_count = 0;
 
-            println!(
-                "info string Aspiration fail low at depth {} (attempt {}), widening alpha",
-                depth, fail_low_count
-            );
+            if uci_info {
+                println!(
+                    "info string Aspiration fail low at depth {} (attempt {}), widening alpha",
+                    depth, fail_low_count
+                );
+            }
 
-            if fail_low_count >= 2 {
-                println!("info string Second fail low, switching to full window search");
+            if fail_low_count >= 1 {
+                if uci_info {
+                    println!("info string Second fail low, switching to full window search");
+                }
                 let fallback_result = alpha_beta(
                     game,
                     depth,
                     1,
                     -f32::INFINITY,
-                    beta,
+                    f32::INFINITY,
                     previous_pv,
                     stop_flag,
                     stats,
@@ -973,18 +989,22 @@ fn aspiration_search(
             fail_high_count += 1;
             fail_low_count = 0;
 
-            println!(
-                "info string Aspiration fail high at depth {} (attempt {}), widening beta",
-                depth, fail_high_count
-            );
+            if uci_info {
+                println!(
+                    "info string Aspiration fail high at depth {} (attempt {}), widening beta",
+                    depth, fail_high_count
+                );
+            }
 
-            if fail_high_count >= 2 {
-                println!("info string Second fail high, switching to full window search");
+            if fail_high_count >= 1 {
+                if uci_info {
+                    println!("info string Second fail high, switching to full window search");
+                }
                 let fallback_result = alpha_beta(
                     game,
                     depth,
                     1,
-                    alpha,
+                    -f32::INFINITY,
                     f32::INFINITY,
                     previous_pv,
                     stop_flag,

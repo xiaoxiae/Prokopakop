@@ -1,0 +1,16 @@
+[package]
+name = "prokopakop-bullet-nnue-trainer"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bullet_lib = { git = "https://github.com/jw1912/bullet", package = "bullet_lib" }
+
+[[bin]]
+name = "train"
+path = "src/main.rs"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1

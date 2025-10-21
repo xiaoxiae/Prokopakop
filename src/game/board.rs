@@ -3,6 +3,7 @@ use crate::game::evaluate::{
     MINOR_MAJOR_PIECE_VALUES, PIECE_VALUES, calculate_game_phase, evaluate_bishop_pair,
     evaluate_king_safety, evaluate_material, evaluate_mobility, evaluate_positional,
 };
+use crate::game::nnue::{Accumulator, get_network};
 use crate::game::pieces::ColoredPiece;
 use crate::utils::bitboard::{
     BLACK_PROMOTION_ROW, Bitboard, BitboardExt, MAGIC_BLOCKER_BITBOARD, PIECE_MOVE_BITBOARDS,
@@ -279,14 +280,55 @@ pub struct Game {
 
     // stuff for making eval simpler
     pub non_pawn_remaining_material: f32,
+
+    // NNUE accumulators: white perspective and black perspective (vertically mirrored + color flipped)
+    pub white_accumulator: Accumulator,
+    pub black_accumulator: Accumulator,
 }
 
 impl Game {
+    /// Convert Rust piece enum to NNUE piece type.
+    /// Rust: Rook=0, Bishop=1, Queen=2, Knight=3, Pawn=4, King=5
+    /// NNUE: Pawn=0, Knight=1, Bishop=2, Rook=3, Queen=4, King=5
+    fn piece_to_nnue_type(piece: Piece) -> usize {
+        match piece {
+            Piece::Pawn => 0,
+            Piece::Knight => 1,
+            Piece::Bishop => 2,
+            Piece::Rook => 3,
+            Piece::Queen => 4,
+            Piece::King => 5,
+        }
+    }
+
+    /// Calculate NNUE feature index for white perspective.
+    fn calculate_white_feature_idx(square: u8, piece: Piece, color: Color) -> usize {
+        let nnue_piece_type = Self::piece_to_nnue_type(piece);
+        let nnue_color = match color {
+            Color::White => 0,
+            Color::Black => 1,
+        };
+        64 * (nnue_color * 6 + nnue_piece_type) + (square as usize)
+    }
+
+    /// Calculate NNUE feature index for black perspective (vertically mirrored + color flipped).
+    fn calculate_black_feature_idx(square: u8, piece: Piece, color: Color) -> usize {
+        let mirrored_square = square ^ 0b111000;
+
+        let nnue_piece_type = Self::piece_to_nnue_type(piece);
+        let nnue_color = match color {
+            Color::White => 1,
+            Color::Black => 0,
+        };
+        64 * (nnue_color * 6 + nnue_piece_type) + (mirrored_square as usize)
+    }
+
     pub fn new(fen: Option<&str>) -> Game {
         let fen_game = fen.unwrap_or("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
 
         let mut parts = fen_game.split_whitespace();
 
+        let net = get_network();
         let mut game = Game {
             color_bitboards: [Bitboard::default(); Color::COUNT],
             side: Color::White,
@@ -300,6 +342,8 @@ impl Game {
             zobrist_key: 0,
             all_pieces: Bitboard::default(),
             non_pawn_remaining_material: 0.0,
+            white_accumulator: Accumulator::new(net),
+            black_accumulator: Accumulator::new(net),
         };
 
         let mut y = 0u32;
@@ -481,6 +525,14 @@ impl Game {
         self.zobrist_key ^= ZOBRIST_TABLE.pieces[color as usize][piece as usize][square as usize];
 
         self.non_pawn_remaining_material -= MINOR_MAJOR_PIECE_VALUES[piece as usize + 1];
+
+        // Update NNUE accumulators
+        let net = get_network();
+        let square_u8 = square as u8;
+        let white_idx = Self::calculate_white_feature_idx(square_u8, piece, color);
+        let black_idx = Self::calculate_black_feature_idx(square_u8, piece, color);
+        self.white_accumulator.remove_feature(white_idx, net);
+        self.black_accumulator.remove_feature(black_idx, net);
     }
 
     fn set_piece(&mut self, square: BoardSquare, colored_piece @ (piece, color): ColoredPiece) {
@@ -497,6 +549,14 @@ impl Game {
         self.zobrist_key ^= ZOBRIST_TABLE.pieces[color as usize][piece as usize][square as usize];
 
         self.non_pawn_remaining_material += MINOR_MAJOR_PIECE_VALUES[piece as usize + 1];
+
+        // Update NNUE accumulators
+        let net = get_network();
+        let square_u8 = square as u8;
+        let white_idx = Self::calculate_white_feature_idx(square_u8, piece, color);
+        let black_idx = Self::calculate_black_feature_idx(square_u8, piece, color);
+        self.white_accumulator.add_feature(white_idx, net);
+        self.black_accumulator.add_feature(black_idx, net);
     }
 
     // EWW duplication!!!
@@ -516,6 +576,14 @@ impl Game {
         self.zobrist_key ^= ZOBRIST_TABLE.pieces[C::COLOR_INDEX][P::PIECE_INDEX][square as usize];
 
         self.non_pawn_remaining_material += MINOR_MAJOR_PIECE_VALUES[P::PIECE_INDEX + 1];
+
+        // Update NNUE accumulators
+        let net = get_network();
+        let square_u8 = square as u8;
+        let white_idx = Self::calculate_white_feature_idx(square_u8, P::PIECE, C::COLOR);
+        let black_idx = Self::calculate_black_feature_idx(square_u8, P::PIECE, C::COLOR);
+        self.white_accumulator.add_feature(white_idx, net);
+        self.black_accumulator.add_feature(black_idx, net);
     }
 
     fn update_turn(&mut self, delta: isize) {
@@ -1641,6 +1709,17 @@ impl Game {
             -1
         } else {
             0
+        }
+    }
+
+    /// Evaluate the current position using the NNUE network.
+    /// Returns the evaluation from the perspective of the side to move.
+    pub fn nnue_evaluate(&self) -> i32 {
+        let net = get_network();
+        if self.side == Color::White {
+            net.evaluate(&self.white_accumulator, &self.black_accumulator)
+        } else {
+            -net.evaluate(&self.black_accumulator, &self.white_accumulator)
         }
     }
 

@@ -4,7 +4,7 @@ use crate::game::evaluate::{
     evaluate_mobility, evaluate_positional,
 };
 use crate::game::pieces::Color;
-use crate::game::search::{PositionHistory, SearchLimits, iterative_deepening};
+use crate::game::search::{PositionHistory, SearchLimits, SearchResult, iterative_deepening};
 use crate::game::table::TranspositionTable;
 
 use fxhash::FxHashMap;
@@ -37,12 +37,13 @@ pub struct GameController {
     pub hash_table_size: usize,
     pub move_overhead: u64,
     pub threads: u64,
-    position_history: PositionHistory,
+    pub position_history: PositionHistory,
     initialized: bool,
-    search_thread: Option<JoinHandle<BoardMove>>,
+    search_thread: Option<JoinHandle<SearchResult>>,
     stop_flag: Arc<AtomicBool>,
     tt: Arc<Mutex<TranspositionTable>>,
     used_jokes: Vec<bool>,
+    last_search_result: Option<SearchResult>,
 }
 
 #[derive(Debug)]
@@ -227,6 +228,7 @@ impl GameController {
             stop_flag: Arc::new(AtomicBool::new(false)),
             tt: Arc::new(Mutex::new(TranspositionTable::new(128))),
             used_jokes: vec![false; JOKES.len()],
+            last_search_result: None,
         }
     }
 
@@ -436,7 +438,7 @@ impl GameController {
         total_count
     }
 
-    pub fn search(&mut self, params: Vec<String>) {
+    pub fn search(&mut self, params: Vec<String>, uci_info: bool) {
         // Stop + reset any existing search
         self.stop_search();
         self.stop_flag.store(false, Ordering::Relaxed);
@@ -456,6 +458,7 @@ impl GameController {
                 max_depth: search_params.depth,
                 max_nodes: search_params.nodes,
                 max_time_ms: search_params.calculate_move_time(game_clone.side, move_overhead),
+                exact: search_params.movetime.is_some(),
                 moves: search_params.searchmoves,
                 infinite: search_params.infinite,
             };
@@ -468,6 +471,7 @@ impl GameController {
                         stop_flag,
                         &mut *tt_guard,
                         &mut position_history_clone,
+                        uci_info,
                     )
                 } else {
                     unreachable!();
@@ -475,25 +479,44 @@ impl GameController {
             };
 
             // Output the best move in UCI format
-            println!("bestmove {}", result.best_move.unparse());
+            if uci_info {
+                println!("bestmove {}", result.best_move.unparse());
 
-            if let Ok(mut tt_guard) = tt.lock() {
-                tt_guard.prune_old_entries();
+                if let Ok(mut tt_guard) = tt.lock() {
+                    let pruned = tt_guard.prune_old_entries();
+                    println!("info string Pruned {} old TT entries", pruned);
+                }
             }
 
-            result.best_move
+            result
         });
 
         self.search_thread = Some(handle);
     }
 
-    pub fn stop_search(&mut self) {
-        // Signal the search to stop
+    pub fn stop_search(&mut self) -> Option<SearchResult> {
+        // Signal the search to stop (used for UCI "stop" command)
         self.stop_flag.store(true, Ordering::Relaxed);
 
         if let Some(handle) = self.search_thread.take() {
-            let _ = handle.join();
+            if let Ok(result) = handle.join() {
+                self.last_search_result = Some(result.clone());
+                return Some(result);
+            }
         }
+        None
+    }
+
+    pub fn wait_for_search(&mut self) -> Option<SearchResult> {
+        // Wait for search to complete naturally (don't interrupt)
+        // Used for training data generation where we want full evaluations
+        if let Some(handle) = self.search_thread.take() {
+            if let Ok(result) = handle.join() {
+                self.last_search_result = Some(result.clone());
+                return Some(result);
+            }
+        }
+        None
     }
 
     pub fn print_uci_options(&self) {
@@ -541,6 +564,13 @@ impl GameController {
         println!();
 
         println!("Total Evaluation: {:.2}", total_evaluation);
+    }
+
+    pub fn print_nnue_evaluation(&self) {
+        let nnue_score = self.game.nnue_evaluate();
+
+        println!("=== NNUE Evaluation ===");
+        println!("Total Evaluation: {:.2}", nnue_score);
     }
 
     pub fn tell_joke(&mut self) {
