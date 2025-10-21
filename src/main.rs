@@ -38,20 +38,12 @@ fn main() {
                 .default_value("32"),
         )
         .arg(
-            Arg::new("time-min")
-                .short('m')
-                .long("time-min")
-                .value_name("MS")
-                .help("Minimum time per move in milliseconds (default: 10)")
-                .default_value("10"),
-        )
-        .arg(
-            Arg::new("time-max")
-                .short('M')
-                .long("time-max")
-                .value_name("MS")
-                .help("Maximum time per move in milliseconds (default: 50)")
-                .default_value("50"),
+            Arg::new("depth")
+                .short('d')
+                .long("depth")
+                .value_name("DEPTH")
+                .help("Fixed search depth per move (default: 8)")
+                .default_value("8"),
         )
         .arg(
             Arg::new("output")
@@ -72,8 +64,8 @@ fn main() {
             Arg::new("start-moves-max")
                 .long("start-moves-max")
                 .value_name("NUM")
-                .help("Maximum number of random starting moves (default: 4)")
-                .default_value("4"),
+                .help("Maximum number of random starting moves (default: 6)")
+                .default_value("6"),
         )
         .get_matches();
 
@@ -90,14 +82,9 @@ fn main() {
             .and_then(|s| s.parse::<u32>().ok())
             .unwrap();
 
-        let time_min = matches
-            .get_one::<String>("time-min")
-            .and_then(|s| s.parse::<u64>().ok())
-            .unwrap();
-
-        let time_max = matches
-            .get_one::<String>("time-max")
-            .and_then(|s| s.parse::<u64>().ok())
+        let search_depth = matches
+            .get_one::<String>("depth")
+            .and_then(|s| s.parse::<usize>().ok())
             .unwrap();
 
         let output_file = matches
@@ -115,11 +102,6 @@ fn main() {
             .and_then(|s| s.parse::<u32>().ok())
             .unwrap();
 
-        if time_min > time_max {
-            eprintln!("Error: time-min must be <= time-max");
-            std::process::exit(1);
-        }
-
         if start_moves_min > start_moves_max {
             eprintln!("Error: start-moves-min must be <= start-moves-max");
             std::process::exit(1);
@@ -127,18 +109,12 @@ fn main() {
 
         eprintln!("=== NNUE Training Data Generator ===");
         eprintln!("Games: {}", num_games);
-        eprintln!("Time per move: {} - {} ms", time_min, time_max);
+        eprintln!("Search depth: {}", search_depth);
         eprintln!("Starting moves: {} - {}", start_moves_min, start_moves_max);
         eprintln!("Output file: {}", output_file);
         eprintln!();
 
-        let config = TrainingConfig::new(
-            num_games,
-            time_min,
-            time_max,
-            start_moves_min,
-            start_moves_max,
-        );
+        let config = TrainingConfig::new(num_games, search_depth, start_moves_min, start_moves_max);
         let generator = TrainingDataGenerator::new(config);
 
         // Generate training data in parallel and write immediately to file

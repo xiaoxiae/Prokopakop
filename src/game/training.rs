@@ -50,8 +50,7 @@ impl GameResult {
 #[derive(Debug, Clone)]
 pub struct TrainingConfig {
     pub num_games: u32,
-    pub move_time_min_ms: u64,
-    pub move_time_max_ms: u64,
+    pub search_depth: usize,
     pub start_moves_min: u32,
     pub start_moves_max: u32,
 }
@@ -59,23 +58,16 @@ pub struct TrainingConfig {
 impl TrainingConfig {
     pub fn new(
         num_games: u32,
-        move_time_min_ms: u64,
-        move_time_max_ms: u64,
+        search_depth: usize,
         start_moves_min: u32,
         start_moves_max: u32,
     ) -> Self {
         Self {
             num_games,
-            move_time_min_ms,
-            move_time_max_ms,
+            search_depth,
             start_moves_min,
             start_moves_max,
         }
-    }
-
-    pub fn random_move_time(&self) -> u64 {
-        let mut rng = rand::rng();
-        rng.random_range(self.move_time_min_ms..=self.move_time_max_ms)
     }
 
     pub fn random_starting_moves(&self) -> u32 {
@@ -98,9 +90,9 @@ impl TrainingDataGenerator {
     fn play_game(&self) -> Vec<TrainingPosition> {
         let mut controller = GameController::new();
         controller.initialize();
+        controller.move_overhead = 0;
 
         let mut positions = Vec::new();
-        let move_time = self.config.random_move_time();
 
         let mut game_result = None;
 
@@ -139,7 +131,7 @@ impl TrainingDataGenerator {
             // Store current position before search
             let current_fen = controller.game.get_fen();
 
-            let search_params = vec!["movetime".to_string(), move_time.to_string()];
+            let search_params = vec!["depth".to_string(), self.config.search_depth.to_string()];
             controller.search(search_params, false);
 
             // Wait for search to complete naturally (don't interrupt)
