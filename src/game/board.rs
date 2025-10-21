@@ -1494,6 +1494,35 @@ impl Game {
     }
 
     pub(crate) fn evaluate(&self) -> f32 {
+        let remaining_pieces = (self.color_bitboards[Color::White as usize]
+            | self.color_bitboards[Color::Black as usize])
+            .count_ones();
+
+        // Insufficient mating material (1 knight / bishop)
+        if remaining_pieces == 3
+            && (self.piece_bitboards[Piece::Knight as usize] != 0
+                || self.piece_bitboards[Piece::Bishop as usize] != 0)
+        {
+            return 0.0;
+        }
+
+        // Insufficient mating material (2 same-colored bishops)
+        if remaining_pieces == 4 && self.piece_bitboards[Piece::Bishop as usize] != 2 {
+            let white_bishop_color = (self.color_bitboards[Color::White as usize]
+                & self.piece_bitboards[Piece::Bishop as usize])
+                .next_index()
+                % 2;
+
+            let black_bishop_color = (self.color_bitboards[Color::Black as usize]
+                & self.piece_bitboards[Piece::Bishop as usize])
+                .next_index()
+                % 2;
+
+            if white_bishop_color == black_bishop_color {
+                return 0.0;
+            }
+        }
+
         let (white_material, black_material) = evaluate_material(self);
         let game_phase = calculate_game_phase(self);
 
