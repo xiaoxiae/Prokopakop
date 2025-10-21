@@ -8,7 +8,7 @@ use crate::utils::square::{BoardSquare, BoardSquareExt};
 // Do not increase this! We're using it to count moves to checkmate
 // by incrementing via PLY and subtract later. Incrementing this too much
 // will make it loose precision and the PLY info.
-pub const CHECKMATE_SCORE: f32 = 100_000.0;
+pub const CHECKMATE_SCORE: f32 = 32767.0;
 
 // Base piece values
 pub const PAWN_VALUE: f32 = 100.0;
