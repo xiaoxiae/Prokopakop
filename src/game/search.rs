@@ -596,7 +596,7 @@ fn alpha_beta(
         let is_quiet_move = !is_capture && !is_promotion && !gives_check;
 
         // Futility pruning: Skip quiet moves if position is hopeless
-        if can_prune_node && is_quiet_move {
+        if moves_searched > 0 && can_prune_node && is_quiet_move {
             continue;
         }
 
