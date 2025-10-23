@@ -5,4 +5,4 @@ CLAUDE.md
 venv
 ignored
 
-data/nnue.bin
+data/nnue*
