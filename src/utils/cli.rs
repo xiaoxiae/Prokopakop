@@ -20,9 +20,18 @@ impl GUICommand {
     pub fn receive() -> GUICommand {
         let mut input = String::new();
 
-        io::stdin()
-            .read_line(&mut input)
-            .expect("Failed to read line");
+        match io::stdin().read_line(&mut input) {
+            Ok(0) => {
+                // EOF reached (Ctrl+D on Unix)
+                return GUICommand::Quit;
+            }
+            Ok(_) => {
+                // Input received successfully
+            }
+            Err(_) => {
+                panic!("Failed to read line");
+            }
+        }
 
         let parts = input.as_str().trim().split_whitespace().collect::<Vec<_>>();
 
