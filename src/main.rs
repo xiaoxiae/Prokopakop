@@ -200,8 +200,7 @@ fn main() {
             GUICommand::Stop => {
                 let _ = controller.stop_search();
             }
-            GUICommand::Eval => controller.print_detailed_evaluation(),
-            GUICommand::NnueEval => controller.print_nnue_evaluation(),
+            GUICommand::Eval => controller.print_evaluation(),
             GUICommand::Joke => controller.tell_joke(),
             GUICommand::Invalid(command) => eprintln!("Invalid command: {}", command),
         }

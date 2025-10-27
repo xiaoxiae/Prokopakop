@@ -13,19 +13,6 @@ pub(crate) const WHITE_PROMOTION_ROW: Bitboard = 0x00FF_0000_0000_0000;
 pub(crate) const BLACK_PROMOTION_ROW: Bitboard = 0x0000_0000_0000_FF00;
 
 pub(crate) trait BitboardExt {
-    const FILES: [Bitboard; 8] = [
-        0x0101010101010101,
-        0x0202020202020202,
-        0x0404040404040404,
-        0x0808080808080808,
-        0x1010101010101010,
-        0x2020202020202020,
-        0x4040404040404040,
-        0x8080808080808080,
-    ];
-
-    const ONES: Bitboard = 0xFFFFFFFFFFFFFFFF;
-
     fn next_index(&self) -> BoardSquare;
     fn is_set(&self, index: BoardSquare) -> bool;
     fn iter_positions(&self) -> BitboardIterator;

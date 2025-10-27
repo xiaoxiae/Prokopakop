@@ -1,8 +1,5 @@
 use super::pieces::{Color, Piece};
-use crate::game::evaluate::{
-    MINOR_MAJOR_PIECE_VALUES, PIECE_VALUES, calculate_game_phase, evaluate_bishop_pair,
-    evaluate_king_safety, evaluate_material, evaluate_mobility, evaluate_positional,
-};
+use crate::game::evaluate::get_see_piece_value;
 use crate::game::nnue::{Accumulator, get_network};
 use crate::game::pieces::ColoredPiece;
 use crate::utils::bitboard::{
@@ -278,9 +275,6 @@ pub struct Game {
     // store the zobrist key for the current position (computed iteratively)
     pub zobrist_key: u64,
 
-    // stuff for making eval simpler
-    pub non_pawn_remaining_material: f32,
-
     // NNUE accumulators: white perspective and black perspective (vertically mirrored + color flipped)
     pub white_accumulator: Accumulator,
     pub black_accumulator: Accumulator,
@@ -341,7 +335,6 @@ impl Game {
             history: vec![],
             zobrist_key: 0,
             all_pieces: Bitboard::default(),
-            non_pawn_remaining_material: 0.0,
             white_accumulator: Accumulator::new(net),
             black_accumulator: Accumulator::new(net),
         };
@@ -524,8 +517,6 @@ impl Game {
 
         self.zobrist_key ^= ZOBRIST_TABLE.pieces[color as usize][piece as usize][square as usize];
 
-        self.non_pawn_remaining_material -= MINOR_MAJOR_PIECE_VALUES[piece as usize + 1];
-
         // Update NNUE accumulators
         let net = get_network();
         let square_u8 = square as u8;
@@ -547,8 +538,6 @@ impl Game {
             | self.color_bitboards[Color::Black as usize];
 
         self.zobrist_key ^= ZOBRIST_TABLE.pieces[color as usize][piece as usize][square as usize];
-
-        self.non_pawn_remaining_material += MINOR_MAJOR_PIECE_VALUES[piece as usize + 1];
 
         // Update NNUE accumulators
         let net = get_network();
@@ -574,8 +563,6 @@ impl Game {
             | self.color_bitboards[Color::Black as usize];
 
         self.zobrist_key ^= ZOBRIST_TABLE.pieces[C::COLOR_INDEX][P::PIECE_INDEX][square as usize];
-
-        self.non_pawn_remaining_material += MINOR_MAJOR_PIECE_VALUES[P::PIECE_INDEX + 1];
 
         // Update NNUE accumulators
         let net = get_network();
@@ -1561,134 +1548,8 @@ impl Game {
         is_check
     }
 
-    pub(crate) fn evaluate(&self) -> f32 {
-        let remaining_pieces = (self.color_bitboards[Color::White as usize]
-            | self.color_bitboards[Color::Black as usize])
-            .count_ones();
-
-        // Insufficient mating material (1 knight / bishop)
-        if remaining_pieces == 3
-            && (self.piece_bitboards[Piece::Knight as usize] != 0
-                || self.piece_bitboards[Piece::Bishop as usize] != 0)
-        {
-            return 0.0;
-        }
-
-        // Insufficient mating material (2 same-colored bishops)
-        if remaining_pieces == 4 && self.piece_bitboards[Piece::Bishop as usize] != 2 {
-            let white_bishop_color = (self.color_bitboards[Color::White as usize]
-                & self.piece_bitboards[Piece::Bishop as usize])
-                .next_index()
-                % 2;
-
-            let black_bishop_color = (self.color_bitboards[Color::Black as usize]
-                & self.piece_bitboards[Piece::Bishop as usize])
-                .next_index()
-                % 2;
-
-            if white_bishop_color == black_bishop_color {
-                return 0.0;
-            }
-        }
-
-        let (white_material, black_material) = evaluate_material(self);
-        let game_phase = calculate_game_phase(self);
-
-        let (white_move_count, white_moves) = self.get_side_pseudo_legal_moves(Color::White);
-        let (black_move_count, black_moves) = self.get_side_pseudo_legal_moves(Color::Black);
-
-        let white_moves_slice = &white_moves[..white_move_count];
-        let black_moves_slice = &black_moves[..black_move_count];
-
-        let material_value = white_material - black_material;
-        let positional_value = evaluate_positional(self, game_phase);
-        let bishop_pair_value = evaluate_bishop_pair(self, game_phase);
-
-        let mobility_value =
-            evaluate_mobility(self, game_phase, white_moves_slice, black_moves_slice);
-
-        let king_safety =
-            evaluate_king_safety(self, game_phase, white_moves_slice, black_moves_slice);
-
-        material_value + positional_value + mobility_value + bishop_pair_value + king_safety
-    }
-
     pub fn is_fifty_move_rule(&self) -> bool {
         self.halfmoves_since_capture >= 100
-    }
-
-    pub(crate) fn get_side_pseudo_legal_moves(&self, color: Color) -> (usize, [BoardMove; 256]) {
-        match color {
-            Color::White => self.get_pseudo_legal_moves_const::<ConstWhite>(),
-            Color::Black => self.get_pseudo_legal_moves_const::<ConstBlack>(),
-        }
-    }
-
-    fn get_pseudo_legal_moves_const<C: ConstColor>(&self) -> (usize, [BoardMove; 256]) {
-        let mut moves = [BoardMove::default(); 256];
-        let mut move_count = 0usize;
-
-        // Generate moves for each piece type
-        self.add_pseudo_legal_piece_moves::<ConstPawn, C>(&mut moves, &mut move_count);
-        self.add_pseudo_legal_piece_moves::<ConstKnight, C>(&mut moves, &mut move_count);
-        self.add_pseudo_legal_piece_moves::<ConstBishop, C>(&mut moves, &mut move_count);
-        self.add_pseudo_legal_piece_moves::<ConstRook, C>(&mut moves, &mut move_count);
-        self.add_pseudo_legal_piece_moves::<ConstQueen, C>(&mut moves, &mut move_count);
-        self.add_pseudo_legal_piece_moves::<ConstKing, C>(&mut moves, &mut move_count);
-
-        (move_count, moves)
-    }
-
-    fn add_pseudo_legal_piece_moves<P: ConstPiece, C: ConstColor>(
-        &self,
-        moves: &mut [BoardMove; 256],
-        move_count: &mut usize,
-    ) {
-        let piece_bitboard = self.colored_piece_bitboard_const::<P, C>();
-
-        // Special handling for pawns due to promotions
-        if P::PIECE == Piece::Pawn {
-            self.add_pseudo_legal_pawn_moves::<C>(piece_bitboard, moves, move_count);
-            return;
-        }
-
-        // For all other pieces, just generate regular moves
-        for square in piece_bitboard.iter_positions() {
-            let target_bitboard = self.get_pseudo_legal_move_bitboard_const::<P, C>(square);
-            self.add_regular_moves(square, target_bitboard, moves, move_count);
-        }
-    }
-
-    fn add_pseudo_legal_pawn_moves<C: ConstColor>(
-        &self,
-        pawn_bitboard: Bitboard,
-        moves: &mut [BoardMove; 256],
-        move_count: &mut usize,
-    ) {
-        let promotion_rank = if C::COLOR == Color::White {
-            WHITE_PROMOTION_ROW
-        } else {
-            BLACK_PROMOTION_ROW
-        };
-
-        // Handle promoting pawns
-        for square in (pawn_bitboard & promotion_rank).iter_positions() {
-            let target_bitboard = self.get_pseudo_legal_move_bitboard_const::<ConstPawn, C>(square);
-            self.add_promotion_moves(square, target_bitboard, moves, move_count);
-        }
-
-        // Handle non-promoting pawns
-        for square in (pawn_bitboard & !promotion_rank).iter_positions() {
-            let target_bitboard = self.get_pseudo_legal_move_bitboard_const::<ConstPawn, C>(square);
-            self.add_regular_moves(square, target_bitboard, moves, move_count);
-        }
-    }
-
-    pub(crate) fn get_king_position(&self, color: Color) -> BoardSquare {
-        match color {
-            Color::White => self.get_king_position_const::<ConstWhite>(),
-            Color::Black => self.get_king_position_const::<ConstBlack>(),
-        }
     }
 
     pub fn see_sign(&self, square: BoardSquare) -> i8 {
@@ -1699,10 +1560,10 @@ impl Game {
             None => return 0,
         };
 
-        let mut balance = PIECE_VALUES[target_piece as usize + 1];
+        let mut balance = get_see_piece_value(target_piece);
         let mut occupied = self.all_pieces;
         let mut side = self.side;
-        let mut last_captured = PIECE_VALUES[target_piece as usize + 1];
+        let mut last_captured = get_see_piece_value(target_piece);
 
         loop {
             let attacker_sq = match self.get_smallest_attacker(square, side, occupied) {
@@ -1711,7 +1572,7 @@ impl Game {
             };
 
             let (attacker_piece, _) = self.pieces[attacker_sq as usize].unwrap();
-            let attacker_value = PIECE_VALUES[attacker_piece as usize + 1];
+            let attacker_value = get_see_piece_value(attacker_piece);
 
             if side == self.side {
                 balance += last_captured;
@@ -1743,12 +1604,12 @@ impl Game {
 
     /// Evaluate the current position using the NNUE network.
     /// Returns the evaluation from the perspective of the side to move.
-    pub fn nnue_evaluate(&self) -> i32 {
+    pub(crate) fn evaluate(&self) -> f32 {
         let net = get_network();
         if self.side == Color::White {
-            net.evaluate(&self.white_accumulator, &self.black_accumulator)
+            net.evaluate(&self.white_accumulator, &self.black_accumulator) as f32
         } else {
-            -net.evaluate(&self.black_accumulator, &self.white_accumulator)
+            -net.evaluate(&self.black_accumulator, &self.white_accumulator) as f32
         }
     }
 
@@ -1765,7 +1626,7 @@ impl Game {
 
         let mut occupied = self.all_pieces;
         let mut side = self.side;
-        let mut captured_value = PIECE_VALUES[target_piece as usize + 1];
+        let mut captured_value = get_see_piece_value(target_piece);
 
         // Simulate exchange
         loop {
@@ -1782,7 +1643,7 @@ impl Game {
 
             // Update for next iteration
             occupied &= !attacker_sq.to_mask();
-            captured_value = PIECE_VALUES[attacker_piece as usize + 1];
+            captured_value = get_see_piece_value(attacker_piece);
             side = !side;
             depth += 1;
 
