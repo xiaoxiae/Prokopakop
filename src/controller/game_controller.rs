@@ -524,7 +524,6 @@ impl GameController {
         println!("option name Move Overhead type spin default 10 min 0 max 5000");
         println!("option name Threads type spin default 1 min 1 max 1024");
         println!("option name PerftHash type check default true");
-        println!("option name OwnBook type string default <empty>");
     }
 
     pub fn print_detailed_evaluation(&self) {
