@@ -3,7 +3,7 @@ use crate::game::pieces::Color;
 use fxhash::FxHashMap;
 use rand::Rng;
 use rayon::prelude::*;
-use std::fs::File;
+use std::fs::OpenOptions;
 use std::io::Write;
 use std::sync::mpsc;
 use std::thread;
@@ -193,7 +193,10 @@ impl TrainingDataGenerator {
 
         // Spawn writer thread that immediately writes positions to file
         let writer_thread = thread::spawn(move || {
-            let mut file = File::create(&path)?;
+            let mut file = OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&path)?;
             let mut total_positions = 0u64;
             let mut games_processed = 0u32;
             let mut unique_positions = FxHashMap::default();
