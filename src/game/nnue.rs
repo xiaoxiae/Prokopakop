@@ -1,13 +1,14 @@
-use std::sync::OnceLock;
 use std::fs;
 use std::path::Path;
+use std::sync::OnceLock;
 
 const HIDDEN_SIZE: usize = 128;
 const SCALE: i32 = 400;
 const QA: i16 = 255;
 const QB: i16 = 64;
 
-static DEFAULT_NNUE: Network = unsafe { std::mem::transmute(*include_bytes!("../../data/nnue.bin")) };
+static DEFAULT_NNUE: Network =
+    unsafe { std::mem::transmute(*include_bytes!("../../data/nnue.bin")) };
 static LOADED_NNUE: OnceLock<Box<Network>> = OnceLock::new();
 
 #[inline]
@@ -112,11 +113,20 @@ impl Accumulator {
 /// Load a NNUE network from a file path.
 /// Returns true if successful, false otherwise.
 pub fn load_nnue_from_file(path: &Path) -> bool {
+    // Fail if a network is already loaded
+    if LOADED_NNUE.get().is_some() {
+        eprintln!("NNUE network already loaded, please restart the engine.");
+        return false;
+    }
+
     match fs::read(path) {
         Ok(data) => {
             if data.len() != std::mem::size_of::<Network>() {
-                eprintln!("NNUE file size mismatch: expected {}, got {}",
-                    std::mem::size_of::<Network>(), data.len());
+                eprintln!(
+                    "NNUE file size mismatch: expected {}, got {}",
+                    std::mem::size_of::<Network>(),
+                    data.len()
+                );
                 return false;
             }
 
@@ -143,5 +153,8 @@ pub fn load_nnue_from_file(path: &Path) -> bool {
 /// Get a reference to the active NNUE network.
 /// If a network was loaded from file, returns that; otherwise returns the default.
 pub fn get_network() -> &'static Network {
-    LOADED_NNUE.get().map(|boxed| &**boxed).unwrap_or(&DEFAULT_NNUE)
+    LOADED_NNUE
+        .get()
+        .map(|boxed| &**boxed)
+        .unwrap_or(&DEFAULT_NNUE)
 }
