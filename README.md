@@ -28,11 +28,13 @@ A moderately fast UCI chess engine written in Rust that **kops the Prokop**.
 
 ### Evaluation
 
+Uses a self-trained **NNUE** (transitioned at commit `b0cf0c1`); initially trained on a hand-crafted eval that used
+
 - [Material](https://www.chessprogramming.org/Material) with [Bishop Pair](https://www.chessprogramming.org/Bishop_Pair) bonus
 - [Piece-Square tables](https://www.chessprogramming.org/Piece-Square_Tables) with game phase interpolation
 - [Pawn Structure](https://www.chessprogramming.org/Pawn_Structure) (doubled pawns, passed pawns, isolated pawns)
 - [Piece Mobility](https://www.chessprogramming.org/Mobility) using pseudo-legal move generation
-- **[King Safety](https://www.chessprogramming.org/King_Safety)** (pawn shield, open files, enemy piece attacks in king zone)
+- [King Safety](https://www.chessprogramming.org/King_Safety) (pawn shield, open files, enemy piece attacks in king zone)
 
 ## Usage
 
@@ -61,7 +63,7 @@ quit                             # Exit engine
 and also some special commands that are not UCI-compliant, but I'm a rebel:
 
 ```
-eval                             # Show detailed position evaluation
+eval                             # Show position evaluation
 joke                             # Tells a random joke... just be careful to not ask for too many
 ```
 
