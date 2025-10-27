@@ -1,9 +1,14 @@
+use std::sync::OnceLock;
+use std::fs;
+use std::path::Path;
+
 const HIDDEN_SIZE: usize = 128;
 const SCALE: i32 = 400;
 const QA: i16 = 255;
 const QB: i16 = 64;
 
-static NNUE: Network = unsafe { std::mem::transmute(*include_bytes!("../../data/nnue.bin")) };
+static DEFAULT_NNUE: Network = unsafe { std::mem::transmute(*include_bytes!("../../data/nnue.bin")) };
+static LOADED_NNUE: OnceLock<Box<Network>> = OnceLock::new();
 
 #[inline]
 /// Square Clipped ReLU - Activation Function.
@@ -104,7 +109,39 @@ impl Accumulator {
     }
 }
 
-/// Get a reference to the loaded NNUE network.
+/// Load a NNUE network from a file path.
+/// Returns true if successful, false otherwise.
+pub fn load_nnue_from_file(path: &Path) -> bool {
+    match fs::read(path) {
+        Ok(data) => {
+            if data.len() != std::mem::size_of::<Network>() {
+                eprintln!("NNUE file size mismatch: expected {}, got {}",
+                    std::mem::size_of::<Network>(), data.len());
+                return false;
+            }
+
+            // Create a boxed Network from the binary data
+            let mut network = Box::new(unsafe { std::mem::zeroed::<Network>() });
+            unsafe {
+                std::ptr::copy_nonoverlapping(
+                    data.as_ptr() as *const Network,
+                    &mut *network as *mut Network,
+                    1,
+                );
+            }
+
+            let _ = LOADED_NNUE.get_or_init(|| network);
+            true
+        }
+        Err(e) => {
+            eprintln!("Failed to load NNUE file {}: {}", path.display(), e);
+            false
+        }
+    }
+}
+
+/// Get a reference to the active NNUE network.
+/// If a network was loaded from file, returns that; otherwise returns the default.
 pub fn get_network() -> &'static Network {
-    &NNUE
+    LOADED_NNUE.get().map(|boxed| &**boxed).unwrap_or(&DEFAULT_NNUE)
 }

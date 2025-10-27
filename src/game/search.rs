@@ -510,7 +510,10 @@ fn alpha_beta(
         && !in_check
         && beta.abs() < CHECKMATE_SCORE - 1000.0
         && static_eval >= beta
-        && game.non_pawn_remaining_material != 0.0
+        && (game.color_bitboards[Color::White as usize]
+            | game.color_bitboards[Color::Black as usize])
+            == (game.piece_bitboards[Piece::Pawn as usize]
+                | game.piece_bitboards[Piece::King as usize])
     {
         game.make_null_move();
 
