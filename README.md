@@ -12,11 +12,6 @@ A moderately fast UCI chess engine written in Rust that **kops the Prokop**.
 - **[Generics](https://www.chessprogramming.org/Generic_Programming)** - Const generics for piece/color function variants
 - **Iterative [Zobrist Hashing](https://www.chessprogramming.org/Zobrist_Hashing)** - Position hashing for transposition tables
 
-<figure>
-    <img src="scripts/benchmark.png" alt="Performance Across Commits" width="100%">
-    <figcaption><em>Performance benchmarks across git commits on a i9-14900K. Benchmarks use perft 5, hashing and bulk-counting. Slower than Stockfish, but faster than making them manually.</em></figcaption>
-</figure>
-
 ### Search
 
 - **[Alpha-Beta](https://www.chessprogramming.org/Alpha-Beta)** via **[Negamax](https://www.chessprogramming.org/Negamax)** with **[PV-Search](https://www.chessprogramming.org/Principal_Variation_Search)**
@@ -38,12 +33,6 @@ A moderately fast UCI chess engine written in Rust that **kops the Prokop**.
 - [Pawn Structure](https://www.chessprogramming.org/Pawn_Structure) (doubled pawns, passed pawns, isolated pawns)
 - [Piece Mobility](https://www.chessprogramming.org/Mobility) using pseudo-legal move generation
 - **[King Safety](https://www.chessprogramming.org/King_Safety)** (pawn shield, open files, enemy piece attacks in king zone)
-
-
-<figure>
-    <img src="scripts/tournament.png" alt="Tournament Results Heatmap" width="100%">
-    <figcaption><em>Tournament results heatmap showing win rates between different engine versions. Each cell shows the win rate of the row engine against the column engine.</em></figcaption>
-</figure>
 
 ## Usage
 
