@@ -5,7 +5,7 @@ version = 4
 [[package]]
 name = "acyclib"
 version = "0.3.0"
-source = "git+https://github.com/jw1912/bullet#f270e3ea72b35d1b3dfaec90be2d964ca18543a8"
+source = "git+https://github.com/jw1912/bullet#d1204eb05c465d6f4f5c3da0cb824d2d4473b51a"
 dependencies = [
  "parking_lot",
  "rand",
@@ -89,7 +89,7 @@ checksum = "812e12b5285cc515a9c72a5c1d3b6d46a19dac5acfef5265968c166106e31dd3"
 [[package]]
 name = "bullet_cuda_backend"
 version = "0.1.0"
-source = "git+https://github.com/jw1912/bullet#f270e3ea72b35d1b3dfaec90be2d964ca18543a8"
+source = "git+https://github.com/jw1912/bullet#d1204eb05c465d6f4f5c3da0cb824d2d4473b51a"
 dependencies = [
  "acyclib",
  "cudarc",
@@ -99,7 +99,7 @@ dependencies = [
 [[package]]
 name = "bullet_lib"
 version = "1.0.0"
-source = "git+https://github.com/jw1912/bullet#f270e3ea72b35d1b3dfaec90be2d964ca18543a8"
+source = "git+https://github.com/jw1912/bullet#d1204eb05c465d6f4f5c3da0cb824d2d4473b51a"
 dependencies = [
  "acyclib",
  "bullet_cuda_backend",
@@ -327,6 +327,7 @@ name = "prokopakop-bullet-nnue-trainer"
 version = "0.1.0"
 dependencies = [
  "bullet_lib",
+ "bulletformat",
  "clap",
  "serde",
  "toml",
