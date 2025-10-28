@@ -11,9 +11,35 @@ use bullet_lib::{
     },
     value::{ValueTrainerBuilder, loader},
 };
+use clap::{Parser, Subcommand};
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::io::{self, BufRead};
 use std::path::PathBuf;
+
+#[derive(Parser)]
+#[command(name = "train")]
+#[command(about = "NNUE trainer with utilities", long_about = None)]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Run hyperparameter optimization training
+    Train {
+        /// Path to experiment directory containing config.toml
+        #[arg(value_name = "DIR")]
+        experiment_dir: String,
+    },
+    /// Deduplicate FEN positions from a file
+    Deduplicate {
+        /// Path to input file (or stdin if not provided)
+        #[arg(value_name = "FILE")]
+        input_file: Option<String>,
+    },
+}
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct TrainingConfig {
@@ -74,23 +100,19 @@ impl HyperparamConfig {
     }
 }
 
-fn main() {
-    let args: Vec<String> = std::env::args().collect();
-
-    if args.len() != 2 {
-        eprintln!("Usage: {} <experiment_directory>", args[0]);
-        std::process::exit(1);
-    }
-
-    let experiment_dir = PathBuf::from(&args[1]);
+fn run_train(experiment_dir_str: &str) {
+    let experiment_dir = PathBuf::from(experiment_dir_str);
     if !experiment_dir.is_dir() {
-        eprintln!("Error: {} is not a valid directory", args[1]);
+        eprintln!("Error: {} is not a valid directory", experiment_dir_str);
         std::process::exit(1);
     }
 
     let config_path = experiment_dir.join("config.toml");
     if !config_path.exists() {
-        eprintln!("Error: config.toml not found in {}", experiment_dir.display());
+        eprintln!(
+            "Error: config.toml not found in {}",
+            experiment_dir.display()
+        );
         std::process::exit(1);
     }
 
@@ -157,7 +179,9 @@ fn main() {
                     SavedFormat::id("l0w").round().quantise::<i16>(config.qa),
                     SavedFormat::id("l0b").round().quantise::<i16>(config.qa),
                     SavedFormat::id("l1w").round().quantise::<i16>(config.qb),
-                    SavedFormat::id("l1b").round().quantise::<i16>((config.qa as i32 * config.qb as i32) as i16),
+                    SavedFormat::id("l1b")
+                        .round()
+                        .quantise::<i16>((config.qa as i32 * config.qb as i32) as i16),
                 ])
                 // map output into ranges [0, 1] to fit against our labels which
                 // are in the same range
@@ -186,7 +210,9 @@ fn main() {
                     start_superbatch: config.start_superbatch,
                     end_superbatch: config.end_superbatch,
                 },
-                wdl_scheduler: wdl::ConstantWDL { value: hyperparam_config.wdl },
+                wdl_scheduler: wdl::ConstantWDL {
+                    value: hyperparam_config.wdl,
+                },
                 lr_scheduler: lr::StepLR {
                     start: hyperparam_config.start_lr,
                     gamma: hyperparam_config.gamma,
@@ -213,4 +239,55 @@ fn main() {
     }
 
     println!("Hyperparameter optimization experiment completed!");
+}
+
+fn run_deduplicate(input_file: Option<&str>) {
+    let mut seen_fens = std::collections::HashSet::new();
+
+    let reader: Box<dyn BufRead> = if let Some(file_path) = input_file {
+        Box::new(io::BufReader::new(
+            fs::File::open(file_path).unwrap_or_else(|e| {
+                eprintln!("Error opening file '{}': {}", file_path, e);
+                std::process::exit(1);
+            }),
+        ))
+    } else {
+        Box::new(io::BufReader::new(io::stdin()))
+    };
+
+    for line in reader.lines() {
+        let line = match line {
+            Ok(l) => l,
+            Err(e) => {
+                eprintln!("Error reading line: {}", e);
+                continue;
+            }
+        };
+
+        let line = line.trim_end_matches('\n');
+        if line.is_empty() {
+            continue;
+        }
+
+        // Extract FEN (everything before the first |)
+        let fen = line.split('|').next().unwrap_or("").trim();
+
+        if !seen_fens.contains(fen) {
+            seen_fens.insert(fen.to_string());
+            println!("{}", line);
+        }
+    }
+}
+
+fn main() {
+    let cli = Cli::parse();
+
+    match cli.command {
+        Commands::Train { experiment_dir } => {
+            run_train(&experiment_dir);
+        }
+        Commands::Deduplicate { input_file } => {
+            run_deduplicate(input_file.as_deref());
+        }
+    }
 }
