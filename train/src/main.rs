@@ -61,7 +61,6 @@ struct TrainingConfig {
     gamma_values: Vec<f32>,
 
     // Training parameters
-    superbatches: usize,
     lr_step: usize,
     repeats: usize,
 
