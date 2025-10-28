@@ -11,11 +11,14 @@ use bullet_lib::{
     },
     value::{ValueTrainerBuilder, loader},
 };
+use bulletformat::{BulletFormat, ChessBoard};
 use clap::{Parser, Subcommand};
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::io::{self, BufRead};
-use std::path::PathBuf;
+use std::fs::File;
+use std::io::{self, BufRead, BufReader, BufWriter};
+use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 #[derive(Parser)]
 #[command(name = "train")]
@@ -38,6 +41,15 @@ enum Commands {
         /// Path to input file (or stdin if not provided)
         #[arg(value_name = "FILE")]
         input_file: Option<String>,
+    },
+    /// Convert text FEN to binary format
+    Convert {
+        /// Path to input file (text FEN)
+        #[arg(short, long)]
+        input: PathBuf,
+        /// Path to output file (binary)
+        #[arg(short, long)]
+        output: PathBuf,
     },
 }
 
@@ -279,6 +291,50 @@ fn run_deduplicate(input_file: Option<&str>) {
     }
 }
 
+fn convert_text(
+    inp_path: impl AsRef<Path>,
+    out_path: impl AsRef<Path>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let timer = Instant::now();
+
+    let file = BufReader::new(File::open(&inp_path)?);
+
+    let mut data = Vec::new();
+
+    let mut results = [0, 0, 0];
+
+    let mut output = BufWriter::new(File::create(&out_path)?);
+
+    for line in file.lines() {
+        match line?.parse::<ChessBoard>() {
+            Ok(pos) => {
+                results[pos.result_idx()] += 1;
+                data.push(pos);
+            }
+            Err(message) => println!("error parsing: {message}"),
+        }
+
+        if data.len() % 16384 == 0 {
+            BulletFormat::write_to_bin(&mut output, &data)?;
+            data.clear();
+        }
+    }
+
+    BulletFormat::write_to_bin(&mut output, &data)?;
+
+    println!(
+        "Summary: {} Positions in {:.2} seconds",
+        results.iter().sum::<u64>(),
+        timer.elapsed().as_secs_f32()
+    );
+    println!(
+        "Wins: {}, Draws: {}, Losses: {}",
+        results[2], results[1], results[0]
+    );
+
+    Ok(())
+}
+
 fn main() {
     let cli = Cli::parse();
 
@@ -288,6 +344,12 @@ fn main() {
         }
         Commands::Deduplicate { input_file } => {
             run_deduplicate(input_file.as_deref());
+        }
+        Commands::Convert { input, output } => {
+            if let Err(e) = convert_text(&input, &output) {
+                eprintln!("Error: {}", e);
+                std::process::exit(1);
+            }
         }
     }
 }
