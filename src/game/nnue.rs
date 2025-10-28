@@ -111,23 +111,21 @@ impl Accumulator {
 }
 
 /// Load a NNUE network from a file path.
-/// Returns true if successful, false otherwise.
-pub fn load_nnue_from_file(path: &Path) -> bool {
+/// Panics if the path is invalid or the network fails to load.
+pub fn load_nnue_from_file(path: &Path) {
     // Fail if a network is already loaded
     if LOADED_NNUE.get().is_some() {
-        eprintln!("NNUE network already loaded, please restart the engine.");
-        return false;
+        panic!("NNUE network already loaded, please restart the engine.");
     }
 
     match fs::read(path) {
         Ok(data) => {
             if data.len() != std::mem::size_of::<Network>() {
-                eprintln!(
+                panic!(
                     "NNUE file size mismatch: expected {}, got {}",
                     std::mem::size_of::<Network>(),
                     data.len()
                 );
-                return false;
             }
 
             // Create a boxed Network from the binary data
@@ -141,11 +139,10 @@ pub fn load_nnue_from_file(path: &Path) -> bool {
             }
 
             let _ = LOADED_NNUE.get_or_init(|| network);
-            true
+            println!("info string NNUE loaded successfully!");
         }
         Err(e) => {
-            eprintln!("Failed to load NNUE file {}: {}", path.display(), e);
-            false
+            panic!("Failed to load NNUE file {}: {}", path.display(), e);
         }
     }
 }

@@ -323,14 +323,7 @@ impl GameController {
                     );
                 }
             },
-            "nnue" => {
-                // Try to load NNUE from the given path
-                if load_nnue_from_file(Path::new(value)) {
-                    println!("info string NNUE loaded successfully from: {}", value);
-                } else {
-                    eprintln!("Failed to load NNUE from: {}", value);
-                }
-            }
+            "nnue" => load_nnue_from_file(Path::new(value)),
             _ => {
                 eprintln!("Unknown option: {}", name);
             }
