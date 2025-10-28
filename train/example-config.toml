@@ -20,7 +20,6 @@ lr_values = [0.001]
 gamma_values = [0.1]
 
 # Training configuration
-superbatches = 100            # Number of superbatches to train
 lr_step = 20                  # Learning rate decay step size
 repeats = 5                   # Number of times to repeat each configuration
 
