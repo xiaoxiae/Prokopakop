@@ -16,7 +16,7 @@ fn main() {
     // Parse command line arguments
     let matches = Command::new("Prokopakop")
         .version("1.0")
-        .about("UCI Chess Engine")
+        .about("UCI Chess Engine, made to kop the Prokop")
         .arg(
             Arg::new("magic")
                 .long("magic")
