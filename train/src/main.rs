@@ -22,7 +22,7 @@ use std::time::Instant;
 
 #[derive(Parser)]
 #[command(name = "train")]
-#[command(about = "NNUE trainer with utilities", long_about = None)]
+#[command(about = "Prokopakop's NNUE trainer + utilities", long_about = None)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
