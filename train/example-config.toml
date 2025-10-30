@@ -1,0 +1,46 @@
+# Hyperparameter Search Configuration
+#
+# USAGE INSTRUCTIONS:
+# 1. Copy this file to your experiment directory and rename it to config.toml
+# 2. Place your training data file in the same directory, named data.bin
+# 3. Adjust the hyperparameters and training settings as needed
+# 4. Run: cargo run --release -- /path/to/experiment/directory
+#
+# The experiment results will be saved in the same directory as this config file,
+# organized into subdirectories like:
+#   wdl_0.25_lr_0.00100_gamma_0.10_0/
+#   wdl_0.25_lr_0.00100_gamma_0.10_1/
+#   etc.
+
+# Ranges for hyperparameter optimization experiments
+
+# Hyperparameter values to test
+wdl_values = [0.25]
+lr_values = [0.001]
+gamma_values = [0.1]
+
+# Training configuration
+lr_step = 20                  # Learning rate decay step size
+repeats = 5                   # Number of times to repeat each configuration
+
+# Network architecture
+hidden_size = 128             # Hidden layer size for the NNUE network
+
+# Evaluation and scaling
+eval_scale = 400              # Evaluation scale for centipawn mapping
+qa = 255                      # Quantization value for layer 0 weights/biases
+qb = 64                       # Quantization value for layer 1 weights
+
+# Training steps configuration
+batch_size = 16384            # Batch size for training
+batches_per_superbatch = 6104 # Number of batches per superbatch
+start_superbatch = 1          # Starting superbatch number
+end_superbatch = 100          # Ending superbatch number
+
+# Compute settings
+threads = 32                  # Number of threads for training
+batch_queue_size = 64         # Queue size for batch processing
+
+# Data paths
+# Place your training data file in the same directory as this config, named data.bin
+data_path = "data.bin"
