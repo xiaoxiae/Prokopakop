@@ -1,11 +1,9 @@
 use crate::game::board::{BoardMove, BoardMoveExt, Game};
-use crate::game::evaluate::{
-    calculate_game_phase, calculate_king_safety, evaluate_bishop_pair, evaluate_material,
-    evaluate_mobility, evaluate_positional,
-};
+use crate::game::nnue::load_nnue_from_file;
 use crate::game::pieces::Color;
-use crate::game::search::{PositionHistory, SearchLimits, iterative_deepening};
+use crate::game::search::{PositionHistory, SearchLimits, SearchResult, iterative_deepening};
 use crate::game::table::TranspositionTable;
+use std::path::Path;
 
 use fxhash::FxHashMap;
 use std::sync::{
@@ -37,12 +35,13 @@ pub struct GameController {
     pub hash_table_size: usize,
     pub move_overhead: u64,
     pub threads: u64,
-    position_history: PositionHistory,
+    pub position_history: PositionHistory,
     initialized: bool,
-    search_thread: Option<JoinHandle<BoardMove>>,
+    search_thread: Option<JoinHandle<SearchResult>>,
     stop_flag: Arc<AtomicBool>,
     tt: Arc<Mutex<TranspositionTable>>,
     used_jokes: Vec<bool>,
+    last_search_result: Option<SearchResult>,
 }
 
 #[derive(Debug)]
@@ -227,6 +226,7 @@ impl GameController {
             stop_flag: Arc::new(AtomicBool::new(false)),
             tt: Arc::new(Mutex::new(TranspositionTable::new(128))),
             used_jokes: vec![false; JOKES.len()],
+            last_search_result: None,
         }
     }
 
@@ -323,6 +323,7 @@ impl GameController {
                     );
                 }
             },
+            "nnue" => load_nnue_from_file(Path::new(value)),
             _ => {
                 eprintln!("Unknown option: {}", name);
             }
@@ -436,7 +437,7 @@ impl GameController {
         total_count
     }
 
-    pub fn search(&mut self, params: Vec<String>) {
+    pub fn search(&mut self, params: Vec<String>, uci_info: bool) {
         // Stop + reset any existing search
         self.stop_search();
         self.stop_flag.store(false, Ordering::Relaxed);
@@ -456,6 +457,7 @@ impl GameController {
                 max_depth: search_params.depth,
                 max_nodes: search_params.nodes,
                 max_time_ms: search_params.calculate_move_time(game_clone.side, move_overhead),
+                exact: search_params.movetime.is_some(),
                 moves: search_params.searchmoves,
                 infinite: search_params.infinite,
             };
@@ -468,6 +470,7 @@ impl GameController {
                         stop_flag,
                         &mut *tt_guard,
                         &mut position_history_clone,
+                        uci_info,
                     )
                 } else {
                     unreachable!();
@@ -475,25 +478,44 @@ impl GameController {
             };
 
             // Output the best move in UCI format
-            println!("bestmove {}", result.best_move.unparse());
+            if uci_info {
+                println!("bestmove {}", result.best_move.unparse());
 
-            if let Ok(mut tt_guard) = tt.lock() {
-                tt_guard.prune_old_entries();
+                if let Ok(mut tt_guard) = tt.lock() {
+                    let pruned = tt_guard.prune_old_entries();
+                    println!("info string Pruned {} old TT entries", pruned);
+                }
             }
 
-            result.best_move
+            result
         });
 
         self.search_thread = Some(handle);
     }
 
-    pub fn stop_search(&mut self) {
-        // Signal the search to stop
+    pub fn stop_search(&mut self) -> Option<SearchResult> {
+        // Signal the search to stop (used for UCI "stop" command)
         self.stop_flag.store(true, Ordering::Relaxed);
 
         if let Some(handle) = self.search_thread.take() {
-            let _ = handle.join();
+            if let Ok(result) = handle.join() {
+                self.last_search_result = Some(result.clone());
+                return Some(result);
+            }
         }
+        None
+    }
+
+    pub fn wait_for_search(&mut self) -> Option<SearchResult> {
+        // Wait for search to complete naturally (don't interrupt)
+        // Used for training data generation where we want full evaluations
+        if let Some(handle) = self.search_thread.take() {
+            if let Ok(result) = handle.join() {
+                self.last_search_result = Some(result.clone());
+                return Some(result);
+            }
+        }
+        None
     }
 
     pub fn print_uci_options(&self) {
@@ -501,46 +523,12 @@ impl GameController {
         println!("option name Move Overhead type spin default 10 min 0 max 5000");
         println!("option name Threads type spin default 1 min 1 max 1024");
         println!("option name PerftHash type check default true");
-        println!("option name OwnBook type string default <empty>");
+        println!("option name NNUE type string default <none>");
     }
 
-    pub fn print_detailed_evaluation(&self) {
-        let (white_material, black_material) = evaluate_material(&self.game);
-        let game_phase = calculate_game_phase(&self.game);
-
-        let (white_move_count, white_moves) = self.game.get_side_pseudo_legal_moves(Color::White);
-        let (black_move_count, black_moves) = self.game.get_side_pseudo_legal_moves(Color::Black);
-
-        let white_moves_slice = &white_moves[..white_move_count];
-        let black_moves_slice = &black_moves[..black_move_count];
-
-        let positional_value = evaluate_positional(&self.game, game_phase);
-        let bishop_pair_value = evaluate_bishop_pair(&self.game, game_phase);
-
-        let mobility_value =
-            evaluate_mobility(&self.game, game_phase, white_moves_slice, black_moves_slice);
-
-        let white_safety = calculate_king_safety(&self.game, Color::White, black_moves_slice);
-        let black_safety = calculate_king_safety(&self.game, Color::Black, white_moves_slice);
-
-        let total_evaluation = &self.game.evaluate();
-
-        println!("=== Detailed Position Evaluation ===");
-        println!("Game Phase: {:.2}", game_phase);
-        println!();
-
-        println!("Material:");
-        println!("  White: {:.2}", white_material);
-        println!("  Black: {:.2}", black_material);
-        println!("Positional + pawns: {:.2}", positional_value);
-        println!("Mobility: {:.2}", mobility_value);
-        println!("Bishop Pair: {:.2}", bishop_pair_value);
-        println!("King Safety:");
-        println!("  White: {:.2}", white_safety);
-        println!("  Black: {:.2}", black_safety);
-        println!();
-
-        println!("Total Evaluation: {:.2}", total_evaluation);
+    pub fn print_evaluation(&self) {
+        let nnue_score = self.game.evaluate();
+        println!("{:.2}", nnue_score);
     }
 
     pub fn tell_joke(&mut self) {

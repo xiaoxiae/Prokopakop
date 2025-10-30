@@ -10,7 +10,7 @@ pub(crate) enum GUICommand {
     Search(Vec<String>),               // go (with params)
     Stop,                              // stop
     Quit,                              // quit the program
-    Eval,                              // eval - print detailed evaluation
+    Eval,                              // eval - print evaluation
     Joke,                              // joke - tell a random joke
 
     Invalid(String), // placeholder for invalid commands so we can pattern match

@@ -158,7 +158,7 @@ impl TranspositionTable {
         self.overwrites.fetch_add(1, Ordering::Relaxed);
     }
 
-    pub fn prune_old_entries(&mut self) {
+    pub fn prune_old_entries(&mut self) -> usize {
         const MAX_AGE_DIFF: u8 = 2;
         let mut pruned = 0u64;
 
@@ -176,8 +176,9 @@ impl TranspositionTable {
 
         if pruned > 0 {
             self.filled_entries.fetch_sub(pruned, Ordering::Relaxed);
-            println!("info string Pruned {} old TT entries", pruned);
         }
+
+        return pruned as usize;
     }
 
     pub fn clear(&mut self) {
