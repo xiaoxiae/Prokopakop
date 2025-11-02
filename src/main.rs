@@ -1,14 +1,9 @@
-mod controller;
-mod game;
-mod test;
-mod utils;
-
 use clap::{Arg, Command};
-use controller::game_controller::{GameController, MoveResultType};
-use game::board::BoardMoveExt;
-use game::training::{TrainingConfig, TrainingDataGenerator};
-use utils::bitboard::generate_magic_bitboards;
-use utils::cli::GUICommand;
+use prokopakop::controller::cli::GUICommand;
+use prokopakop::controller::controller::{GameController, MoveResultType};
+use prokopakop::controller::training::{TrainingConfig, TrainingDataGenerator};
+use prokopakop::game::bitboard::generate_magic_bitboards;
+use prokopakop::game::board::BoardMoveExt;
 
 fn main() {
     env_logger::init();

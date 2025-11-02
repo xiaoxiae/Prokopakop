@@ -1,9 +1,6 @@
+pub mod bitboard;
 pub mod board;
-pub mod evaluate;
-pub mod history;
-pub mod killer;
-pub mod nnue;
+pub mod magic;
 pub mod pieces;
-pub mod search;
-pub mod table;
-pub mod training;
+pub mod square;
+pub mod zobrist;

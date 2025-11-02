@@ -1,19 +1,19 @@
-use super::pieces::{Color, Piece};
-use crate::game::evaluate::get_see_piece_value;
-use crate::game::nnue::{Accumulator, get_network};
-use crate::game::pieces::ColoredPiece;
-use crate::utils::bitboard::{
+use crate::engine::evaluate::get_see_piece_value;
+use crate::engine::nnue::{Accumulator, get_network};
+use crate::game::bitboard::{
     BLACK_PROMOTION_ROW, Bitboard, BitboardExt, MAGIC_BLOCKER_BITBOARD, PIECE_MOVE_BITBOARDS,
     RAY_BETWEEN, WHITE_PROMOTION_ROW,
 };
-use crate::utils::magic::{MAGIC_ENTRIES, MAGIC_TABLE};
-use crate::utils::square::{BoardSquare, BoardSquareExt};
-use crate::utils::zobris::ZOBRIST_TABLE;
+use crate::game::magic::{MAGIC_ENTRIES, MAGIC_TABLE};
+use crate::game::pieces::ColoredPiece;
+use crate::game::pieces::{Color, Piece};
+use crate::game::square::{BoardSquare, BoardSquareExt};
+use crate::game::zobrist::ZOBRIST_TABLE;
 use strum::EnumCount;
 
-pub(crate) type BoardMove = u16;
+pub type BoardMove = u16;
 
-pub(crate) trait BoardMoveExt {
+pub trait BoardMoveExt {
     fn empty() -> BoardMove;
     fn new(from: BoardSquare, to: BoardSquare, promotion: Option<Piece>) -> BoardMove;
     fn regular(from: BoardSquare, to: BoardSquare) -> BoardMove;

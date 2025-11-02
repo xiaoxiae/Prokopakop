@@ -1,9 +1,11 @@
 #[cfg(test)]
 mod tests {
-    use crate::GameController;
-    use rayon::iter::IntoParallelRefIterator;
-    use rayon::iter::ParallelIterator;
+    use std::collections::HashMap;
     use std::fs;
+
+    use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+
+    use crate::controller::controller::GameController;
 
     #[test]
     fn test_null_move() {
@@ -36,7 +38,9 @@ mod tests {
 
         for position in test_positions {
             println!("Testing Zobrist consistency for: {}", position);
-            controller.new_game_from_fen(position);
+
+            controller.reset_board();
+            controller.set_board_from_fen(position);
 
             let mut zobrist_position_map: HashMap<u64, String> = HashMap::new();
             let mut path = Vec::new();
@@ -150,9 +154,6 @@ mod tests {
     #[cfg(not(debug_assertions))]
     fn test_zobrist_key_transposition_detection() {
         let mut controller = GameController::new();
-
-        // Start from initial position
-        controller.new_game();
 
         let mut seen_positions: HashMap<u64, (String, Vec<String>)> = HashMap::new();
         let mut transpositions_found = 0;
@@ -427,9 +428,9 @@ mod tests {
 #[cfg(test)]
 mod see_tests {
     use crate::{
-        GameController,
-        game::evaluate::{BISHOP_VALUE, KNIGHT_VALUE, PAWN_VALUE, QUEEN_VALUE, ROOK_VALUE},
-        utils::square::BoardSquare,
+        controller::controller::GameController,
+        engine::evaluate::{BISHOP_VALUE, KNIGHT_VALUE, PAWN_VALUE, QUEEN_VALUE, ROOK_VALUE},
+        game::square::BoardSquare,
     };
 
     fn test_see_position(fen: &str, square: &str, expected_score: f32) {

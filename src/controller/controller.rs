@@ -1,8 +1,8 @@
+use crate::engine::nnue::load_nnue_from_file;
+use crate::engine::search::{PositionHistory, SearchLimits, SearchResult, iterative_deepening};
+use crate::engine::table::TranspositionTable;
 use crate::game::board::{BoardMove, BoardMoveExt, Game};
-use crate::game::nnue::load_nnue_from_file;
 use crate::game::pieces::Color;
-use crate::game::search::{PositionHistory, SearchLimits, SearchResult, iterative_deepening};
-use crate::game::table::TranspositionTable;
 use std::path::Path;
 
 use fxhash::FxHashMap;

@@ -1,1 +1,3 @@
-pub mod game_controller;
+pub mod cli;
+pub mod controller;
+pub mod training;

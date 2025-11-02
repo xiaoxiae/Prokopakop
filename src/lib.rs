@@ -1,4 +1,4 @@
-#![allow(dead_code)]
 pub mod controller;
+pub mod engine;
 pub mod game;
-pub mod utils;
+pub mod test;
