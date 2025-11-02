@@ -1,6 +1,6 @@
 use std::io;
 
-pub(crate) enum GUICommand {
+pub enum GUICommand {
     UCI,
     IsReady,
     FenPosition(String),               // position fen <fen>

@@ -1,5 +1,5 @@
 use crate::game::pieces::Piece;
-use crate::utils::square::{BoardSquare, BoardSquareExt};
+use crate::game::square::{BoardSquare, BoardSquareExt};
 use rand::RngCore;
 use rayon::prelude::*;
 use std::fs::File;
@@ -454,7 +454,7 @@ fn serialize_magic_bitboards_to_file_flat<P: AsRef<Path>>(
     Ok(())
 }
 
-pub(crate) fn generate_magic_bitboards() {
+pub fn generate_magic_bitboards() {
     let mut magic_bitboards: MagicBitboards = Vec::with_capacity(128);
 
     // Initialize with basic magic numbers

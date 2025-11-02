@@ -1,4 +1,4 @@
-use crate::utils::bitboard::Bitboard;
+use crate::game::bitboard::Bitboard;
 
 pub type BoardSquare = u8;
 

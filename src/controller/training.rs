@@ -1,4 +1,4 @@
-use crate::controller::game_controller::GameController;
+use crate::controller::controller::GameController;
 use crate::game::pieces::Color;
 use fxhash::FxHashMap;
 use rand::Rng;

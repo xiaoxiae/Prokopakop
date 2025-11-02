@@ -7,12 +7,14 @@ use std::time::Instant;
 
 use fxhash::FxHashMap;
 
+use crate::engine::evaluate::{
+    CHECKMATE_SCORE, QUEEN_VALUE, calculate_game_phase, get_piece_value,
+};
+use crate::engine::history::HistoryTable;
+use crate::engine::killer::KillerMoves;
+use crate::engine::table::{NodeType, TranspositionTable};
 use crate::game::board::{BoardMove, BoardMoveExt, Game};
-use crate::game::evaluate::{CHECKMATE_SCORE, QUEEN_VALUE, calculate_game_phase, get_piece_value};
-use crate::game::history::HistoryTable;
-use crate::game::killer::KillerMoves;
 use crate::game::pieces::{Color, Piece};
-use crate::game::table::{NodeType, TranspositionTable};
 
 const FUTILITY_MARGIN: [f32; 4] = [0.0, 200.0, 400.0, 600.0];
 const REVERSE_FUTILITY_MARGIN: [f32; 4] = [0.0, 150.0, 300.0, 500.0];
