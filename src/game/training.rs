@@ -193,10 +193,7 @@ impl TrainingDataGenerator {
 
         // Spawn writer thread that immediately writes positions to file
         let writer_thread = thread::spawn(move || {
-            let mut file = OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(&path)?;
+            let mut file = OpenOptions::new().create(true).append(true).open(&path)?;
             let mut total_positions = 0u64;
             let mut games_processed = 0u32;
             let mut unique_positions = FxHashMap::default();
