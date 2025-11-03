@@ -4,13 +4,12 @@ use std::time::Instant;
 use crate::engine::evaluate::{
     CHECKMATE_SCORE, QUEEN_VALUE, calculate_game_phase, get_piece_value,
 };
-use crate::engine::history::HistoryTable;
 use crate::engine::killer::KillerMoves;
 use crate::engine::table::{NodeType, TranspositionTable};
 use crate::game::board::{BoardMove, BoardMoveExt, Game};
 use crate::game::pieces::{Color, Piece};
 
-use super::history::PositionHistory;
+use super::history::History;
 use super::limits::SearchLimits;
 use super::results::{SearchResult, SearchStats};
 
@@ -23,9 +22,8 @@ pub struct Search<'a> {
     pub stats: SearchStats,
     pub limits: SearchLimits,
     pub tt: &'a mut TranspositionTable,
-    pub position_history: &'a mut PositionHistory,
+    pub history: &'a mut History,
     pub killer_moves: KillerMoves,
-    pub history_table: HistoryTable,
     pub stop_flag: Arc<AtomicBool>,
     pub uci_info: bool,
 }
@@ -37,7 +35,7 @@ impl<'a> Search<'a> {
         limits: SearchLimits,
         stop_flag: Arc<AtomicBool>,
         tt: &'a mut TranspositionTable,
-        position_history: &'a mut PositionHistory,
+        history: &'a mut History,
         uci_info: bool,
     ) -> Self {
         Self {
@@ -45,9 +43,8 @@ impl<'a> Search<'a> {
             stats: SearchStats::new(),
             limits,
             tt,
-            position_history,
+            history,
             killer_moves: KillerMoves::new(256),
-            history_table: HistoryTable::new(),
             stop_flag,
             uci_info,
         }
@@ -169,7 +166,7 @@ impl<'a> Search<'a> {
         }
 
         if ply > 1 && ply <= 6 {
-            if self.position_history.is_threefold_repetition(zobrist_key) {
+            if self.history.is_threefold_repetition(zobrist_key) {
                 return SearchResult::leaf(0.0);
             }
         }
@@ -362,7 +359,7 @@ impl<'a> Search<'a> {
             self.game.make_move(*board_move);
 
             let new_zobrist = self.game.zobrist_key;
-            self.position_history.push(new_zobrist);
+            self.history.push_position(new_zobrist);
 
             // Pass the PV for the next ply
             let next_pv = if !previous_pv.is_empty() && *board_move == previous_pv[0] {
@@ -380,7 +377,7 @@ impl<'a> Search<'a> {
                 value = -result.evaluation;
 
                 if !result.is_valid() {
-                    self.position_history.pop();
+                    self.history.pop_position();
                     self.game.unmake_move();
                     return SearchResult::interrupted();
                 }
@@ -404,7 +401,7 @@ impl<'a> Search<'a> {
                         self.alpha_beta(reduced_depth, ply + 1, -alpha - 1.0, -alpha, next_pv);
 
                     if !reduced_result.is_valid() {
-                        self.position_history.pop();
+                        self.history.pop_position();
                         self.game.unmake_move();
                         return SearchResult::interrupted();
                     }
@@ -414,9 +411,9 @@ impl<'a> Search<'a> {
                     // If the move fails low, skip it
                     if value <= alpha {
                         // Penalize this move in history since it failed low
-                        self.history_table.add_history_penalty(*board_move, depth);
+                        self.history.add_history_penalty(*board_move, depth);
 
-                        self.position_history.pop();
+                        self.history.pop_position();
                         self.game.unmake_move();
                         moves_searched += 1;
                         if is_quiet_move {
@@ -432,7 +429,7 @@ impl<'a> Search<'a> {
                     self.alpha_beta(depth - 1, ply + 1, -alpha - 1.0, -alpha, next_pv);
 
                 if !null_window_result.is_valid() {
-                    self.position_history.pop();
+                    self.history.pop_position();
                     self.game.unmake_move();
                     return SearchResult::interrupted();
                 }
@@ -458,7 +455,7 @@ impl<'a> Search<'a> {
                 }
             }
 
-            self.position_history.pop();
+            self.history.pop_position();
             self.game.unmake_move();
             moves_searched += 1;
             if is_quiet_move {
@@ -470,13 +467,13 @@ impl<'a> Search<'a> {
                 // This move caused a beta cutoff - it's a good move!
                 if !self.game.is_capture(*board_move) {
                     self.killer_moves.add_killer(ply, *board_move);
-                    self.history_table.add_history(*board_move, depth);
+                    self.history.add_history(*board_move, depth);
                 }
                 break;
             } else if value <= original_alpha {
                 // This move didn't improve alpha - penalize it
                 if !self.game.is_capture(*board_move) {
-                    self.history_table.add_history_penalty(*board_move, depth);
+                    self.history.add_history_penalty(*board_move, depth);
                 }
             }
         }
@@ -786,7 +783,7 @@ impl<'a> Search<'a> {
             } else if mv == killer_moves[1] {
                 -600_000
             } else {
-                -500_000 - self.history_table.get_history_score(&mv)
+                -500_000 - self.history.get_history_score(&mv)
             }
         });
     }

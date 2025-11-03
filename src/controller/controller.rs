@@ -1,5 +1,5 @@
 use crate::engine::nnue::load_nnue_from_file;
-use crate::engine::search::history::PositionHistory;
+use crate::engine::search::history::History;
 use crate::engine::search::limits::SearchLimits;
 use crate::engine::search::results::SearchResult;
 use crate::engine::search::searcher::Search;
@@ -38,7 +38,7 @@ pub struct GameController {
     pub hash_table_size: usize,
     pub move_overhead: u64,
     pub threads: u64,
-    pub position_history: PositionHistory,
+    pub history: History,
     initialized: bool,
     search_thread: Option<JoinHandle<SearchResult>>,
     stop_flag: Arc<AtomicBool>,
@@ -223,7 +223,7 @@ impl GameController {
             hash_table_size: 128,
             move_overhead: 10,
             threads: 1,
-            position_history: PositionHistory::new(),
+            history: History::new(),
             initialized: false,
             search_thread: None,
             stop_flag: Arc::new(AtomicBool::new(false)),
@@ -235,14 +235,14 @@ impl GameController {
 
     pub fn reset_board(&mut self) {
         self.game = Game::new(None);
-        self.position_history = PositionHistory::new();
-        self.position_history.push(self.game.zobrist_key);
+        self.history = History::new();
+        self.history.push_position(self.game.zobrist_key);
     }
 
     pub fn set_board_from_fen(&mut self, fen: &str) {
         self.game = Game::new(Some(fen));
-        self.position_history = PositionHistory::new();
-        self.position_history.push(self.game.zobrist_key);
+        self.history = History::new();
+        self.history.push_position(self.game.zobrist_key);
     }
 
     pub fn reset_transposition_table(&mut self) {
@@ -341,7 +341,7 @@ impl GameController {
                 // Check if the move is in the valid moves array
                 if valid_moves[0..move_count].contains(&board_move) {
                     self.game.make_move(board_move);
-                    self.position_history.push(self.game.zobrist_key);
+                    self.history.push_position(self.game.zobrist_key);
 
                     MoveResultType::Success
                 } else {
@@ -448,7 +448,7 @@ impl GameController {
         let search_params = SearchParams::parse(params);
 
         let mut game_clone = self.game.clone();
-        let mut position_history_clone = self.position_history.clone();
+        let mut history_clone = self.history.clone();
         let stop_flag = Arc::clone(&self.stop_flag);
         let move_overhead = self.move_overhead;
 
@@ -472,7 +472,7 @@ impl GameController {
                         limits,
                         stop_flag,
                         &mut *tt_guard,
-                        &mut position_history_clone,
+                        &mut history_clone,
                         uci_info,
                     );
                     search.run()

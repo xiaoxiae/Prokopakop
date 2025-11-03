@@ -109,8 +109,8 @@ impl TrainingDataGenerator {
             let selected_move = moves_array[random_idx];
             controller.game.make_move(selected_move);
             controller
-                .position_history
-                .push(controller.game.zobrist_key);
+                .history
+                .push_position(controller.game.zobrist_key);
         }
 
         // Play until game ends or max halfmoves reached
@@ -121,7 +121,7 @@ impl TrainingDataGenerator {
             }
 
             if controller
-                .position_history
+                .history
                 .is_threefold_repetition(controller.game.zobrist_key)
             {
                 game_result = Some(GameResult::Draw);
@@ -153,8 +153,8 @@ impl TrainingDataGenerator {
                     // Make the best move
                     controller.game.make_move(result.best_move);
                     controller
-                        .position_history
-                        .push(controller.game.zobrist_key);
+                        .history
+                        .push_position(controller.game.zobrist_key);
                 } else {
                     // No move found - likely checkmate or stalemate
                     break;
