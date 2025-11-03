@@ -1,5 +1,8 @@
 use crate::engine::nnue::load_nnue_from_file;
-use crate::engine::search::{PositionHistory, SearchLimits, SearchResult, iterative_deepening};
+use crate::engine::search::history::PositionHistory;
+use crate::engine::search::limits::SearchLimits;
+use crate::engine::search::results::SearchResult;
+use crate::engine::search::searcher::Search;
 use crate::engine::table::TranspositionTable;
 use crate::game::board::{BoardMove, BoardMoveExt, Game};
 use crate::game::pieces::Color;
@@ -464,14 +467,15 @@ impl GameController {
 
             let result = {
                 if let Ok(mut tt_guard) = tt.lock() {
-                    iterative_deepening(
+                    let mut search = Search::new(
                         &mut game_clone,
                         limits,
                         stop_flag,
                         &mut *tt_guard,
                         &mut position_history_clone,
                         uci_info,
-                    )
+                    );
+                    search.run()
                 } else {
                     unreachable!();
                 }
