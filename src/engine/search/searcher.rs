@@ -79,7 +79,10 @@ impl<'a> Search<'a> {
         for depth in 1..=self.limits.max_depth.unwrap_or(256) {
             // Check if we have enough time for this iteration (skip for first few depths)
             if depth > 3 && last_iteration_ms > 0 {
-                if !self.stats.has_time_for_iteration(&self.limits, last_iteration_ms) {
+                if !self
+                    .stats
+                    .has_time_for_iteration(&self.limits, last_iteration_ms)
+                {
                     if self.uci_info {
                         println!(
                             "info string Skipping depth {} due to time constraints",
@@ -181,7 +184,9 @@ impl<'a> Search<'a> {
             tt_move = Some(tt_entry.best_move);
 
             // Use TT value if depth is sufficient (but not in PV nodes for exact scores)
-            if tt_entry.depth >= depth as u8 && (!is_pv_node || tt_entry.node_type != NodeType::Exact) {
+            if tt_entry.depth >= depth as u8
+                && (!is_pv_node || tt_entry.node_type != NodeType::Exact)
+            {
                 match tt_entry.node_type {
                     NodeType::Exact => {
                         // Exact score - we can return immediately (only in non-PV nodes)
@@ -203,7 +208,11 @@ impl<'a> Search<'a> {
 
                 // Check for alpha-beta cutoff after adjusting bounds
                 if alpha >= beta {
-                    return SearchResult::with_pv(tt_entry.best_move, tt_entry.evaluation, Vec::new());
+                    return SearchResult::with_pv(
+                        tt_entry.best_move,
+                        tt_entry.evaluation,
+                        Vec::new(),
+                    );
                 }
             }
         }
@@ -347,7 +356,8 @@ impl<'a> Search<'a> {
             }
 
             // Extended futility pruning for individual moves at depth 2-3
-            if futility_pruning_enabled && depth >= 2 && is_quiet_move && quiet_moves_searched >= 3 {
+            if futility_pruning_enabled && depth >= 2 && is_quiet_move && quiet_moves_searched >= 3
+            {
                 // Use a more aggressive margin for individual move pruning
                 let move_futility_margin = futility_margin * 1.5;
                 if static_eval + move_futility_margin <= alpha {
@@ -486,7 +496,8 @@ impl<'a> Search<'a> {
             NodeType::Exact // Exact value
         };
 
-        self.tt.store(zobrist_key, depth as u8, best_value, best_move, node_type);
+        self.tt
+            .store(zobrist_key, depth as u8, best_value, best_move, node_type);
 
         // Don't include empty PV moves
         if best_move == BoardMove::empty() {
@@ -632,12 +643,7 @@ impl<'a> Search<'a> {
     }
 
     /// Quiescence search for tactical moves
-    fn quiescence_search(
-        &mut self,
-        ply: usize,
-        mut alpha: f32,
-        beta: f32,
-    ) -> SearchResult {
+    fn quiescence_search(&mut self, ply: usize, mut alpha: f32, beta: f32) -> SearchResult {
         self.stats.increment_nodes();
 
         if self.stats.should_stop(&self.limits, &self.stop_flag) {
@@ -790,8 +796,7 @@ impl<'a> Search<'a> {
 
     /// Calculate MVV-LVA score for move ordering
     fn mvv_lva_score(&self, board_move: &BoardMove) -> i32 {
-        if let Some((victim_piece, _victim_color)) =
-            self.game.pieces[board_move.get_to() as usize]
+        if let Some((victim_piece, _victim_color)) = self.game.pieces[board_move.get_to() as usize]
         {
             if let Some((attacker_piece, _attacker_color)) =
                 self.game.pieces[board_move.get_from() as usize]
@@ -820,8 +825,7 @@ impl<'a> Search<'a> {
         let mut max_gain = 0.0;
 
         // Add value of captured piece
-        if let Some((victim_piece, _victim_color)) =
-            self.game.pieces[board_move.get_to() as usize]
+        if let Some((victim_piece, _victim_color)) = self.game.pieces[board_move.get_to() as usize]
         {
             max_gain += if victim_piece == Piece::King {
                 10000.0

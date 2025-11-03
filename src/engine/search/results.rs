@@ -1,6 +1,6 @@
+use super::limits::SearchLimits;
 use crate::game::board::{BoardMove, BoardMoveExt};
 use std::fmt::{Display, Formatter, Result};
-use super::limits::SearchLimits;
 
 #[derive(Debug, Clone)]
 pub struct SearchResult {
@@ -115,11 +115,7 @@ impl SearchStats {
     }
 
     // New: Check if we have enough time for another iteration
-    pub fn has_time_for_iteration(
-        &self,
-        limits: &SearchLimits,
-        last_iteration_ms: u64,
-    ) -> bool {
+    pub fn has_time_for_iteration(&self, limits: &SearchLimits, last_iteration_ms: u64) -> bool {
         if limits.infinite {
             return true;
         }
