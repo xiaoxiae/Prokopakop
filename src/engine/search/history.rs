@@ -1,12 +1,13 @@
 use fxhash::FxHashMap;
 
 use crate::game::board::{BoardMove, BoardMoveExt};
+use crate::game::pieces::Color;
 
 /// Combined history tracking for move metrics and position repetitions
 #[derive(Debug, Clone)]
 pub struct History {
-    // Move history scores indexed by [from_square][to_square]
-    move_scores: [[i32; 64]; 64],
+    // Move history scores indexed by [color][from_square][to_square]
+    move_scores: [[[i32; 64]; 64]; 2],
     max_score: i32,
 
     // Position repetition tracking
@@ -17,7 +18,7 @@ pub struct History {
 impl History {
     pub fn new() -> Self {
         Self {
-            move_scores: [[0; 64]; 64],
+            move_scores: [[[0; 64]; 64]; 2],
             max_score: 8192, // Threshold for scaling
             positions: FxHashMap::default(),
             position_history: Vec::with_capacity(256),
@@ -25,41 +26,47 @@ impl History {
     }
 
     // Move history methods
-    pub fn add_history(&mut self, board_move: BoardMove, depth: usize) {
+    pub fn add_history(&mut self, board_move: BoardMove, color: Color, depth: usize) {
         let from = board_move.get_from() as usize;
         let to = board_move.get_to() as usize;
+        let color_idx = color as usize;
 
         // Bonus is proportional to depth squared (more weight for deeper cutoffs)
         let bonus = (depth * depth) as i32;
 
-        self.move_scores[from][to] += bonus;
+        self.move_scores[color_idx][from][to] += bonus;
 
         // Check if we need to scale down all scores to prevent overflow
-        if self.move_scores[from][to] > self.max_score {
+        if self.move_scores[color_idx][from][to] > self.max_score {
             self.age_history();
         }
     }
 
-    pub fn add_history_penalty(&mut self, board_move: BoardMove, depth: usize) {
+    pub fn add_history_penalty(&mut self, board_move: BoardMove, color: Color, depth: usize) {
         let from = board_move.get_from() as usize;
         let to = board_move.get_to() as usize;
+        let color_idx = color as usize;
 
         // Smaller penalty to not over-penalize moves
         let penalty = ((depth * depth) / 2) as i32;
 
-        self.move_scores[from][to] = (self.move_scores[from][to] - penalty).max(-self.max_score);
+        self.move_scores[color_idx][from][to] =
+            (self.move_scores[color_idx][from][to] - penalty).max(-self.max_score);
     }
 
-    pub fn get_history_score(&self, board_move: &BoardMove) -> i32 {
+    pub fn get_history_score(&self, board_move: &BoardMove, color: Color) -> i32 {
         let from = board_move.get_from() as usize;
         let to = board_move.get_to() as usize;
-        self.move_scores[from][to]
+        let color_idx = color as usize;
+        self.move_scores[color_idx][from][to]
     }
 
     fn age_history(&mut self) {
-        for from in 0..64 {
-            for to in 0..64 {
-                self.move_scores[from][to] /= 2;
+        for color_idx in 0..2 {
+            for from in 0..64 {
+                for to in 0..64 {
+                    self.move_scores[color_idx][from][to] /= 2;
+                }
             }
         }
     }
