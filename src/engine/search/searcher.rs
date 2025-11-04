@@ -421,7 +421,8 @@ impl<'a> Search<'a> {
                     // If the move fails low, skip it
                     if value <= alpha {
                         // Penalize this move in history since it failed low
-                        self.history.add_history_penalty(*board_move, depth);
+                        self.history
+                            .add_history_penalty(*board_move, !self.game.side, depth);
 
                         self.history.pop_position();
                         self.game.unmake_move();
@@ -477,13 +478,15 @@ impl<'a> Search<'a> {
                 // This move caused a beta cutoff - it's a good move!
                 if !self.game.is_capture(*board_move) {
                     self.killer_moves.add_killer(ply, *board_move);
-                    self.history.add_history(*board_move, depth);
+                    self.history
+                        .add_history(*board_move, !self.game.side, depth);
                 }
                 break;
             } else if value <= original_alpha {
                 // This move didn't improve alpha - penalize it
                 if !self.game.is_capture(*board_move) {
-                    self.history.add_history_penalty(*board_move, depth);
+                    self.history
+                        .add_history_penalty(*board_move, !self.game.side, depth);
                 }
             }
         }
@@ -789,7 +792,7 @@ impl<'a> Search<'a> {
             } else if mv == killer_moves[1] {
                 -600_000
             } else {
-                -500_000 - self.history.get_history_score(&mv)
+                -500_000 - self.history.get_history_score(&mv, self.game.side)
             }
         });
     }
