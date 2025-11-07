@@ -274,7 +274,7 @@ impl<'a> Search<'a> {
             && static_eval >= beta
             && (self.game.color_bitboards[Color::White as usize]
                 | self.game.color_bitboards[Color::Black as usize])
-                == (self.game.piece_bitboards[Piece::Pawn as usize]
+                != (self.game.piece_bitboards[Piece::Pawn as usize]
                     | self.game.piece_bitboards[Piece::King as usize])
         {
             self.game.make_null_move();
