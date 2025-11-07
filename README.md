@@ -2,7 +2,7 @@
 
 A moderately fast UCI chess engine written in Rust that **kops the Prokop**.
 
-**Challenge it on [Lichess](https://lichess.org/@/prokopakop)!**
+**Challenge it on [Lichess](https://lichess.org/@/prokopakop)!** and **read a [blog post](http://slama.dev/prokopakop) on how it was written**
 
 ## Bot
 
