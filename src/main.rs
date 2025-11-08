@@ -142,8 +142,10 @@ fn main() {
             GUICommand::UCI => {
                 let name = "Prokopakop";
                 let author = "Tomíno Komíno";
+                let git_hash = env!("GIT_HASH");
+                let nnue_hash = &env!("NNUE_SHA256")[..8];
 
-                println!("id name {}", name);
+                println!("id name {} (commit:{}, nnue:{})", name, git_hash, nnue_hash);
                 println!("id author {}", author);
 
                 controller.print_uci_options();
