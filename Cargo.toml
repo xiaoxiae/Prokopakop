@@ -12,3 +12,6 @@ rand = "0.9.2"
 clap = "4.5.42"
 rayon = "1.10.0"
 fxhash = "0.2.1"
+
+[build-dependencies]
+sha256 = "1.1"
