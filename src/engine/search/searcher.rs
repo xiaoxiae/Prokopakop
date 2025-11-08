@@ -238,12 +238,10 @@ impl<'a> Search<'a> {
         }
 
         // Razoring - drop into quiescence when evaluation is far below alpha at low depths
-        // Only apply after we've searched a reasonable depth (ply > 6) and at frontier nodes
         if !is_pv_node
             && !in_check
             && depth <= 3
             && depth >= 1
-            && ply > 6
             && alpha.abs() < CHECKMATE_SCORE - 1000.0
         {
             let razoring_margin = match depth {
