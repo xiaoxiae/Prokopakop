@@ -486,15 +486,14 @@ impl<'a> Search<'a> {
                 // This move caused a beta cutoff - it's a good move!
                 if !self.game.is_capture(*board_move) {
                     self.killer_moves.add_killer(ply, *board_move);
-                    self.history
-                        .add_history(*board_move, !self.game.side, depth);
+                    self.history.add_history(*board_move, self.game.side, depth);
                 }
                 break;
             } else if value <= original_alpha {
                 // This move didn't improve alpha - penalize it
                 if !self.game.is_capture(*board_move) {
                     self.history
-                        .add_history_penalty(*board_move, !self.game.side, depth);
+                        .add_history_penalty(*board_move, self.game.side, depth);
                 }
             }
         }
