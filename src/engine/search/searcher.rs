@@ -403,8 +403,18 @@ impl<'a> Search<'a> {
                     && !in_check
                     && !self.game.is_king_in_check(!self.game.side)
                 {
+                    // More reduction for late moves and high depths
+                    let mut reduction =
+                        ((depth as f32).ln() * (move_index as f32).ln() / 2.0) as usize;
+                    reduction = reduction.clamp(1, depth - 1);
+
+                    // Reduce less in PV nodes (when window is wider)
+                    if is_pv_node {
+                        reduction = reduction.saturating_sub(1).max(1);
+                    }
+
                     // Search with reduced depth first
-                    let reduced_depth = depth.saturating_sub(2);
+                    let reduced_depth = depth.saturating_sub(1 + reduction);
                     let reduced_result =
                         self.alpha_beta(reduced_depth, ply + 1, -alpha - 1.0, -alpha, next_pv);
 
