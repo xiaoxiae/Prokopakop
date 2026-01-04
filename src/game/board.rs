@@ -1606,10 +1606,20 @@ impl Game {
     /// Returns the evaluation from the perspective of the side to move.
     pub(crate) fn evaluate(&self) -> f32 {
         let net = get_network();
+        let piece_count = self.all_pieces.count_ones();
+
         if self.side == Color::White {
-            net.evaluate(&self.white_accumulator, &self.black_accumulator) as f32
+            net.evaluate(
+                &self.white_accumulator,
+                &self.black_accumulator,
+                piece_count,
+            ) as f32
         } else {
-            -net.evaluate(&self.black_accumulator, &self.white_accumulator) as f32
+            -net.evaluate(
+                &self.black_accumulator,
+                &self.white_accumulator,
+                piece_count,
+            ) as f32
         }
     }
 

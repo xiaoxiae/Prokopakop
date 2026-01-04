@@ -5,7 +5,7 @@ version = 4
 [[package]]
 name = "acyclib"
 version = "0.3.0"
-source = "git+https://github.com/jw1912/bullet#d1204eb05c465d6f4f5c3da0cb824d2d4473b51a"
+source = "git+https://github.com/xiaoxiae/bullet.git#a029e8d084ab5ff8a5241214c3e14aad84e43b88"
 dependencies = [
  "parking_lot",
  "rand",
@@ -89,7 +89,7 @@ checksum = "812e12b5285cc515a9c72a5c1d3b6d46a19dac5acfef5265968c166106e31dd3"
 [[package]]
 name = "bullet_cuda_backend"
 version = "0.1.0"
-source = "git+https://github.com/jw1912/bullet#d1204eb05c465d6f4f5c3da0cb824d2d4473b51a"
+source = "git+https://github.com/xiaoxiae/bullet.git#a029e8d084ab5ff8a5241214c3e14aad84e43b88"
 dependencies = [
  "acyclib",
  "cudarc",
@@ -99,7 +99,7 @@ dependencies = [
 [[package]]
 name = "bullet_lib"
 version = "1.0.0"
-source = "git+https://github.com/jw1912/bullet#d1204eb05c465d6f4f5c3da0cb824d2d4473b51a"
+source = "git+https://github.com/xiaoxiae/bullet.git#a029e8d084ab5ff8a5241214c3e14aad84e43b88"
 dependencies = [
  "acyclib",
  "bullet_cuda_backend",
@@ -169,9 +169,9 @@ checksum = "b05b61dc5112cbb17e4b6cd61790d9845d13888356391624cbe7e41efeac1e75"
 
 [[package]]
 name = "cudarc"
-version = "0.17.3"
+version = "0.18.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "72ba848ae5c6f3cb36e71eab5f268763e3fabcabe3f7bc683e16f7fa3d46281e"
+checksum = "3aa12038120eb13347a6ae2ffab1d34efe78150125108627fd85044dd4d6ff1e"
 dependencies = [
  "libloading",
 ]
