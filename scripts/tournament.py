@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 
 import argparse
+import shlex
 import subprocess
 import sys
-
 from pathlib import Path
-import shlex
 
 # Tournament configuration constants
-TIME_CONTROL = "5+0.1"
+TIME_CONTROL = "30+0.1"
 ROUNDS = 100
 CONCURRENCY = 32
 OPENING_PLIES = 6
@@ -35,57 +34,192 @@ BINARIES: list[str | dict[str, str | dict[str, str]]] = [
     # "5ddad41",  # bucket TT
     # "6e3bad1",  # history heuristic
     # "c14002b",  # pseudo-legal move generation
-    "e6662f0",  # LMR bug
+    # "e6662f0",  # LMR bug
     # "075f411",  # actually, no pseudo-legal move generation
     # "7490eba",  # futility pruning
-    "8024a6e",  # no partial result usage + better iterative deepening time management
-    "c144fb9",  # no TT cleaning between moves
-    "5cc228e",  # king safety
-    "910fb21",  # DP + NMP tuning
-    "c056f9b",  # SEE
+    # "8024a6e",  # no partial result usage + better iterative deepening time management
+    # "c144fb9",  # no TT cleaning between moves
+    # "5cc228e",  # king safety
+    # "910fb21",  # DP + NMP tuning
+    # "c056f9b",  # SEE
     "9119428",  # razoring
-
+    "3f0d5f5",  # good NNUE
+    "fb7ccfe",
+    # {"label": "current", "options": {"NNUE": "data/nnue.bin"}},
+    # {
+    #     "label": "experiment-9-0",
+    #     "options": {
+    #         "NNUE": "train/experiment-9/wdl_0.25_lr_0.00100_gamma_0.10_0/experiment-100/quantised.bin"
+    #     },
+    # },
+    # {
+    #     "label": "experiment-9-1",
+    #     "options": {"NNUE": "train/experiment-9/wdl_0.25_lr_0.00100_gamma_0.10_1/experiment-100/quantised.bin"}
+    # },
+    # {
+    #     "label": "experiment-10-0",
+    #     "options": {"NNUE": "train/experiment-10/wdl_0.25_lr_0.00100_gamma_0.50_0/experiment-240/quantised.bin"}
+    # },
+    # {
+    #     "label": "experiment-10-1",
+    #     "options": {"NNUE": "train/experiment-10/wdl_0.25_lr_0.00100_gamma_0.50_1/experiment-240/quantised.bin"}
+    # },
+    # {
+    #     "label": "experiment-11-0",
+    #     "options": {"NNUE": "train/experiment-11/wdl_0.25_lr_0.00100_gamma_0.50_0/experiment-240/quantised.bin"}
+    # },
+    # {
+    #     "label": "experiment-11-1",
+    #     "options": {"NNUE": "train/experiment-11/wdl_0.25_lr_0.00100_gamma_0.50_1/experiment-240/quantised.bin"}
+    # },
+    ## {
+    ##     "label": "experiment-12-0",
+    ##     "options": {
+    ##         "NNUE": "train/experiment-12/wdl_0.25_lr_0.00100_gamma_0.50_0/experiment-240/quantised.bin"
+    ##     },
+    ## },
+    # {
+    #     "label": "experiment-12-1",
+    #     "options": {
+    #         "NNUE": "train/experiment-12/wdl_0.25_lr_0.00100_gamma_0.50_1/experiment-240/quantised.bin"
+    #     },
+    # },
+    # {
+    #     "label": "experiment-12-2",
+    #     "options": {
+    #         "NNUE": "train/experiment-12/wdl_0.25_lr_0.00100_gamma_0.50_2/experiment-240/quantised.bin"
+    #     },
+    # },
+    ## {
+    ##     "label": "experiment-13-0",
+    ##     "options": {
+    ##         "NNUE": "train/experiment-13/wdl_0.25_lr_0.00100_gamma_0.50_0/experiment-600/quantised.bin"
+    ##     },
+    ## },
+    # {
+    #     "label": "experiment-13-1",
+    #     "options": {
+    #         "NNUE": "train/experiment-13/wdl_0.25_lr_0.00100_gamma_0.50_1/experiment-600/quantised.bin"
+    #     },
+    # },
+    # {
+    #     "label": "experiment-13-2",
+    #     "options": {"NNUE": "train/experiment-13/wdl_0.25_lr_0.00100_gamma_0.50_2/experiment-600/quantised.bin"}
+    # },
+    # {
+    #     "label": "experiment-13-3",
+    #     "options": {"NNUE": "train/experiment-13/wdl_0.25_lr_0.00100_gamma_0.50_3/experiment-600/quantised.bin"}
+    # },
+    ## {
+    ##     "label": "experiment-14-0",
+    ##     "options": {
+    ##         "NNUE": "train/experiment-14/wdl_0.25_lr_0.00100_gamma_0.50_0/experiment-240/quantised.bin"
+    ##     },
+    ## },
+    ## {
+    ##     "label": "experiment-14-1",
+    ##     "options": {
+    ##         "NNUE": "train/experiment-14/wdl_0.25_lr_0.00100_gamma_0.50_1/experiment-240/quantised.bin"
+    ##     },
+    ## },
+    # {
+    #     "label": "experiment-14-2",
+    #     "options": {"NNUE": "train/experiment-14/wdl_0.25_lr_0.00100_gamma_0.50_2/experiment-240/quantised.bin"}
+    # },
+    # {
+    #     "label": "experiment-14-3",
+    #     "options": {"NNUE": "train/experiment-14/wdl_0.25_lr_0.00100_gamma_0.50_3/experiment-240/quantised.bin"}
+    # },
+    ## {
+    ##     "label": "experiment-15-0",
+    ##     "options": {
+    ##         "NNUE": "train/experiment-15/wdl_0.25_lr_0.00100_gamma_0.50_0/experiment-240/quantised.bin"
+    ##     },
+    ## },
+    ## {
+    ##     "label": "experiment-15-1",
+    ##     "options": {
+    ##         "NNUE": "train/experiment-15/wdl_0.25_lr_0.00100_gamma_0.50_1/experiment-240/quantised.bin"
+    ##     },
+    ## },
+    # {
+    #     "label": "experiment-15-2",
+    #     "options": {
+    #         "NNUE": "train/experiment-15/wdl_0.25_lr_0.00100_gamma_0.50_2/experiment-240/quantised.bin"
+    #     },
+    # },
+    # {
+    #     "label": "experiment-15-3",
+    #     "options": {
+    #         "NNUE": "train/experiment-15/wdl_0.25_lr_0.00100_gamma_0.50_3/experiment-240/quantised.bin"
+    #     },
+    # },
+    # {
+    #     "label": "experiment-15-4",
+    #     "options": {
+    #         "NNUE": "train/experiment-15/wdl_0.25_lr_0.00100_gamma_0.50_4/experiment-240/quantised.bin"
+    #     },
+    # },
+    # {
+    #     "label": "experiment-16-0",
+    #     "options": {
+    #         "NNUE": "train/experiment-16/wdl_0.25_lr_0.00100_gamma_0.50_0/experiment-240/quantised.bin"
+    #     },
+    # },
+    # {
+    #     "label": "experiment-16-1",
+    #     "options": {
+    #         "NNUE": "train/experiment-16/wdl_0.25_lr_0.00100_gamma_0.50_1/experiment-240/quantised.bin"
+    #     },
+    # },
+    # {
+    #     "label": "experiment-16-2",
+    #     "options": {
+    #         "NNUE": "train/experiment-16/wdl_0.25_lr_0.00100_gamma_0.50_2/experiment-240/quantised.bin"
+    #     },
+    # },
+    # {
+    #     "label": "experiment-16-3",
+    #     "options": {
+    #         "NNUE": "train/experiment-16/wdl_0.25_lr_0.00100_gamma_0.50_3/experiment-240/quantised.bin"
+    #     },
+    # },
+    # {
+    #     "label": "experiment-17-0",
+    #     "options": {
+    #         "NNUE": "train/experiment-17/wdl_0.25_lr_0.00100_gamma_0.50_0/experiment-40/quantised.bin"
+    #     },
+    # },
     {
-        "label": "OG",
-        "options": {"NNUE": "data/nnue.bin.og"}
-    },
-
-    {
-        "label": "current",
-        "options": {"NNUE": "data/nnue.bin"}
-    },
-
-    {
-        "label": "experiment-9-0",
-        "options": {"NNUE": "train/experiment-9/wdl_0.25_lr_0.00100_gamma_0.10_0/experiment-100/quantised.bin"}
+        "label": "experiment-18-0",
+        "options": {
+            "NNUE": "train/experiment-18/wdl_0.25_lr_0.00100_gamma_0.50_0/experiment-240/quantised.bin"
+        },
     },
     {
-        "label": "experiment-9-1",
-        "options": {"NNUE": "train/experiment-9/wdl_0.25_lr_0.00100_gamma_0.10_1/experiment-100/quantised.bin"}
+        "label": "experiment-18-1",
+        "options": {
+            "NNUE": "train/experiment-18/wdl_0.25_lr_0.00100_gamma_0.50_1/experiment-240/quantised.bin"
+        },
     },
     {
-        "label": "experiment-9-2",
-        "options": {"NNUE": "train/experiment-9/wdl_0.25_lr_0.00100_gamma_0.10_2/experiment-100/quantised.bin"}
+        "label": "experiment-18-2",
+        "options": {
+            "NNUE": "train/experiment-18/wdl_0.25_lr_0.00100_gamma_0.50_2/experiment-240/quantised.bin"
+        },
     },
     {
-        "label": "experiment-9-3",
-        "options": {"NNUE": "train/experiment-9/wdl_0.25_lr_0.00100_gamma_0.10_3/experiment-100/quantised.bin"}
+        "label": "experiment-18-3",
+        "options": {
+            "NNUE": "train/experiment-18/wdl_0.25_lr_0.00100_gamma_0.50_3/experiment-240/quantised.bin"
+        },
     },
     {
-        "label": "experiment-9-4",
-        "options": {"NNUE": "train/experiment-9/wdl_0.25_lr_0.00100_gamma_0.10_4/experiment-100/quantised.bin"}
+        "label": "experiment-18-4",
+        "options": {
+            "NNUE": "train/experiment-18/wdl_0.25_lr_0.00100_gamma_0.50_4/experiment-240/quantised.bin"
+        },
     },
-
-    {
-        "label": "experiment-10-0",
-        "options": {"NNUE": "train/experiment-10/wdl_0.25_lr_0.00100_gamma_0.10_0/experiment-100/quantised.bin"}
-    },
-    {
-        "label": "experiment-10-1",
-        "options": {"NNUE": "train/experiment-10/wdl_0.50_lr_0.00100_gamma_0.10_0/experiment-100/quantised.bin"}
-    },
-
-    # "nnue-og",
 ]
 
 
@@ -111,7 +245,9 @@ def find_binary(binary_name: str) -> Path | None:
     return None
 
 
-def get_binary_info(binary_item: str | dict[str, str | dict[str, str]]) -> tuple[str, str | None, dict[str, str]]:
+def get_binary_info(
+    binary_item: str | dict[str, str | dict[str, str]],
+) -> tuple[str, str | None, dict[str, str]]:
     """Extract binary name, label, and options from binary item (supports both string and dict formats)."""
     if isinstance(binary_item, str):
         return binary_item, None, {}
@@ -131,7 +267,9 @@ def add_uci_options(cmd: list[str], options: dict[str, str]) -> None:
         cmd.extend([f"option.{option_name}={option_value}"])
 
 
-def build_fastchess_command(binaries: list[str | dict[str, str | dict[str, str]]]) -> list[str]:
+def build_fastchess_command(
+    binaries: list[str | dict[str, str | dict[str, str]]],
+) -> list[str]:
     """
     Build the fastchess command with multiple engines based on binaries.
 
@@ -160,22 +298,29 @@ def build_fastchess_command(binaries: list[str | dict[str, str | dict[str, str]]
             engine_name = binary_name if binary_name else "prokopakop"
         engine_cmd: str = str(binary_path)
 
-        cmd.extend([
-            "-engine",
-            f"cmd={engine_cmd}",
-            f"name={engine_name}-{i}"
-        ])
+        cmd.extend(["-engine", f"cmd={engine_cmd}", f"name={engine_name}-{i}"])
         # Add UCI options for this binary
         add_uci_options(cmd, binary_options)
 
     # Add common parameters
-    cmd.extend([
-        "-each", f"tc={TIME_CONTROL}", "restart=on",
-        "-rounds", str(ROUNDS),
-        "-concurrency", str(CONCURRENCY),
-        "-config", "outname=scripts/tournament_results.json",
-        "-openings", "file=data/book.pgn", "format=pgn", f"plies={OPENING_PLIES}", "order=random",
-    ])
+    cmd.extend(
+        [
+            "-each",
+            f"tc={TIME_CONTROL}",
+            "restart=on",
+            "-rounds",
+            str(ROUNDS),
+            "-concurrency",
+            str(CONCURRENCY),
+            "-config",
+            "outname=scripts/tournament_results.json",
+            "-openings",
+            "file=data/book.pgn",
+            "format=pgn",
+            f"plies={OPENING_PLIES}",
+            "order=random",
+        ]
+    )
 
     # Wrap command with grep filter to remove noisy lines
     cmd_str: str = " ".join(shlex.quote(arg) for arg in cmd)
@@ -199,7 +344,9 @@ def run_fastchess(binaries: list[str | dict[str, str | dict[str, str]]]) -> int:
 
     try:
         # Run the command
-        result: subprocess.CompletedProcess[str] = subprocess.run(command, check=True, text=True)
+        result: subprocess.CompletedProcess[str] = subprocess.run(
+            command, check=True, text=True
+        )
         print("Fastchess completed successfully!")
         return result.returncode
     except subprocess.CalledProcessError as e:
@@ -209,8 +356,6 @@ def run_fastchess(binaries: list[str | dict[str, str | dict[str, str]]]) -> int:
         print("Error: fastchess binary not found at ./bin/fastchess/fastchess")
         print("Please ensure the binary exists and is executable.")
         return 1
-
-
 
 
 def print_engine_info(binaries: list[str | dict[str, str | dict[str, str]]]) -> None:
@@ -247,7 +392,9 @@ def main() -> None:
     """
     Main function to run the fastchess tournament.
     """
-    parser: argparse.ArgumentParser = argparse.ArgumentParser(description="Run fastchess tournament with specified engines")
+    parser: argparse.ArgumentParser = argparse.ArgumentParser(
+        description="Run fastchess tournament with specified engines"
+    )
 
     args: argparse.Namespace = parser.parse_args()
 
