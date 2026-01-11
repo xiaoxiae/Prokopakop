@@ -200,7 +200,10 @@ fn run_train(experiment_dir_str: &str) {
                     SavedFormat::id("l0w").round().quantise::<i16>(config.qa),
                     SavedFormat::id("l0b").round().quantise::<i16>(config.qa),
                     // transpose for efficient CPU inference with output buckets
-                    SavedFormat::id("l1w").round().quantise::<i16>(config.qb).transpose(),
+                    SavedFormat::id("l1w")
+                        .round()
+                        .quantise::<i16>(config.qb)
+                        .transpose(),
                     SavedFormat::id("l1b")
                         .round()
                         .quantise::<i16>((config.qa as i32 * config.qb as i32) as i16),
