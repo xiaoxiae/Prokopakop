@@ -2,7 +2,7 @@ use std::fs;
 use std::path::Path;
 use std::sync::OnceLock;
 
-const HIDDEN_SIZE: usize = 128;
+const HIDDEN_SIZE: usize = 1024;
 const NUM_OUTPUT_BUCKETS: usize = 8;
 const SCALE: i32 = 400;
 const QA: i16 = 255;
