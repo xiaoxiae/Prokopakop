@@ -2,7 +2,7 @@
 Yoinked from https://github.com/jw1912/bullet/blob/main/examples/simple.rs
 */
 use bullet_lib::{
-    game::inputs,
+    game::{inputs, outputs::MaterialCount},
     nn::optimiser,
     trainer::{
         save::SavedFormat,
@@ -66,6 +66,7 @@ struct TrainingConfig {
 
     // Network architecture
     hidden_size: usize,
+    num_output_buckets: usize,
 
     // Evaluation and scaling
     eval_scale: i32,
@@ -177,6 +178,13 @@ fn run_train(experiment_dir_str: &str) {
 
             let checkpoint_dir_str = checkpoint_dir.to_string_lossy().to_string();
 
+            const NUM_OUTPUT_BUCKETS: usize = 8;
+            assert_eq!(
+                config.num_output_buckets, NUM_OUTPUT_BUCKETS,
+                "num_output_buckets must be {} (const generic limitation)",
+                NUM_OUTPUT_BUCKETS
+            );
+
             let mut trainer = ValueTrainerBuilder::default()
                 // makes `ntm_inputs` available below
                 .dual_perspective()
@@ -185,11 +193,17 @@ fn run_train(experiment_dir_str: &str) {
                 .optimiser(optimiser::AdamW)
                 // basic piece-square chessboard inputs
                 .inputs(inputs::Chess768)
+                // output buckets based on material count
+                .output_buckets(MaterialCount::<NUM_OUTPUT_BUCKETS>)
                 // chosen such that inference may be efficiently implemented in-engine
                 .save_format(&[
                     SavedFormat::id("l0w").round().quantise::<i16>(config.qa),
                     SavedFormat::id("l0b").round().quantise::<i16>(config.qa),
-                    SavedFormat::id("l1w").round().quantise::<i16>(config.qb),
+                    // transpose for efficient CPU inference with output buckets
+                    SavedFormat::id("l1w")
+                        .round()
+                        .quantise::<i16>(config.qb)
+                        .transpose(),
                     SavedFormat::id("l1b")
                         .round()
                         .quantise::<i16>((config.qa as i32 * config.qb as i32) as i16),
@@ -199,17 +213,17 @@ fn run_train(experiment_dir_str: &str) {
                 // `target` == wdl * game_result + (1 - wdl) * sigmoid(search score in centipawns / eval_scale)
                 // where `wdl` is determined by `wdl_scheduler`
                 .loss_fn(|output, target| output.sigmoid().squared_error(target))
-                // the basic `(768 -> N)x2 -> 1` inference
-                .build(|builder, stm_inputs, ntm_inputs| {
+                // the `(768 -> N)x2 -> NUM_OUTPUT_BUCKETS` inference with bucket selection
+                .build(|builder, stm_inputs, ntm_inputs, output_buckets| {
                     // weights
                     let l0 = builder.new_affine("l0", 768, config.hidden_size);
-                    let l1 = builder.new_affine("l1", 2 * config.hidden_size, 1);
+                    let l1 = builder.new_affine("l1", 2 * config.hidden_size, NUM_OUTPUT_BUCKETS);
 
                     // inference
                     let stm_hidden = l0.forward(stm_inputs).screlu();
                     let ntm_hidden = l0.forward(ntm_inputs).screlu();
                     let hidden_layer = stm_hidden.concat(ntm_hidden);
-                    l1.forward(hidden_layer)
+                    l1.forward(hidden_layer).select(output_buckets)
                 });
 
             let schedule = TrainingSchedule {
