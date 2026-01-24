@@ -42,7 +42,7 @@ BINARIES: list[str | dict[str, str | dict[str, str]]] = [
     # "5cc228e",  # king safety
     # "910fb21",  # DP + NMP tuning
     # "c056f9b",  # SEE
-    "9119428",  # razoring
+    # "9119428",  # razoring
     "3f0d5f5",  # good NNUE
     "fb7ccfe",
     # {"label": "current", "options": {"NNUE": "data/nnue.bin"}},
@@ -58,7 +58,9 @@ BINARIES: list[str | dict[str, str | dict[str, str]]] = [
     # },
     # {
     #     "label": "experiment-10-0",
-    #     "options": {"NNUE": "train/experiment-10/wdl_0.25_lr_0.00100_gamma_0.50_0/experiment-240/quantised.bin"}
+    #     "options": {
+    #         "NNUE": "train/experiment-10/wdl_0.25_lr_0.00100_gamma_0.50_0/experiment-240/quantised.bin"
+    #     },
     # },
     # {
     #     "label": "experiment-10-1",
@@ -66,18 +68,20 @@ BINARIES: list[str | dict[str, str | dict[str, str]]] = [
     # },
     # {
     #     "label": "experiment-11-0",
-    #     "options": {"NNUE": "train/experiment-11/wdl_0.25_lr_0.00100_gamma_0.50_0/experiment-240/quantised.bin"}
+    #     "options": {
+    #         "NNUE": "train/experiment-11/wdl_0.25_lr_0.00100_gamma_0.50_0/experiment-240/quantised.bin"
+    #     },
     # },
     # {
     #     "label": "experiment-11-1",
     #     "options": {"NNUE": "train/experiment-11/wdl_0.25_lr_0.00100_gamma_0.50_1/experiment-240/quantised.bin"}
     # },
-    ## {
-    ##     "label": "experiment-12-0",
-    ##     "options": {
-    ##         "NNUE": "train/experiment-12/wdl_0.25_lr_0.00100_gamma_0.50_0/experiment-240/quantised.bin"
-    ##     },
-    ## },
+    # {
+    #     "label": "experiment-12-0",
+    #     "options": {
+    #         "NNUE": "train/experiment-12/wdl_0.25_lr_0.00100_gamma_0.50_0/experiment-240/quantised.bin"
+    #     },
+    # },
     # {
     #     "label": "experiment-12-1",
     #     "options": {
@@ -90,12 +94,12 @@ BINARIES: list[str | dict[str, str | dict[str, str]]] = [
     #         "NNUE": "train/experiment-12/wdl_0.25_lr_0.00100_gamma_0.50_2/experiment-240/quantised.bin"
     #     },
     # },
-    ## {
-    ##     "label": "experiment-13-0",
-    ##     "options": {
-    ##         "NNUE": "train/experiment-13/wdl_0.25_lr_0.00100_gamma_0.50_0/experiment-600/quantised.bin"
-    ##     },
-    ## },
+    # {
+    #     "label": "experiment-13-0",
+    #     "options": {
+    #         "NNUE": "train/experiment-13/wdl_0.25_lr_0.00100_gamma_0.50_0/experiment-600/quantised.bin"
+    #     },
+    # },
     # {
     #     "label": "experiment-13-1",
     #     "options": {
@@ -130,18 +134,18 @@ BINARIES: list[str | dict[str, str | dict[str, str]]] = [
     #     "label": "experiment-14-3",
     #     "options": {"NNUE": "train/experiment-14/wdl_0.25_lr_0.00100_gamma_0.50_3/experiment-240/quantised.bin"}
     # },
-    ## {
-    ##     "label": "experiment-15-0",
-    ##     "options": {
-    ##         "NNUE": "train/experiment-15/wdl_0.25_lr_0.00100_gamma_0.50_0/experiment-240/quantised.bin"
-    ##     },
-    ## },
-    ## {
-    ##     "label": "experiment-15-1",
-    ##     "options": {
-    ##         "NNUE": "train/experiment-15/wdl_0.25_lr_0.00100_gamma_0.50_1/experiment-240/quantised.bin"
-    ##     },
-    ## },
+    {
+        "label": "experiment-15-0",
+        "options": {
+            "NNUE": "train/experiment-15/wdl_0.25_lr_0.00100_gamma_0.50_0/experiment-240/quantised.bin"
+        },
+    },
+    # {
+    #     "label": "experiment-15-1",
+    #     "options": {
+    #         "NNUE": "train/experiment-15/wdl_0.25_lr_0.00100_gamma_0.50_1/experiment-240/quantised.bin"
+    #     },
+    # },
     # {
     #     "label": "experiment-15-2",
     #     "options": {
@@ -184,42 +188,20 @@ BINARIES: list[str | dict[str, str | dict[str, str]]] = [
     #         "NNUE": "train/experiment-16/wdl_0.25_lr_0.00100_gamma_0.50_3/experiment-240/quantised.bin"
     #     },
     # },
-    # {
-    #     "label": "experiment-17-0",
-    #     "options": {
-    #         "NNUE": "train/experiment-17/wdl_0.25_lr_0.00100_gamma_0.50_0/experiment-40/quantised.bin"
-    #     },
-    # },
-    {
-        "label": "experiment-18-0",
-        "options": {
-            "NNUE": "train/experiment-18/wdl_0.25_lr_0.00100_gamma_0.50_0/experiment-240/quantised.bin"
-        },
-    },
-    {
-        "label": "experiment-18-1",
-        "options": {
-            "NNUE": "train/experiment-18/wdl_0.25_lr_0.00100_gamma_0.50_1/experiment-240/quantised.bin"
-        },
-    },
-    {
-        "label": "experiment-18-2",
-        "options": {
-            "NNUE": "train/experiment-18/wdl_0.25_lr_0.00100_gamma_0.50_2/experiment-240/quantised.bin"
-        },
-    },
-    {
-        "label": "experiment-18-3",
-        "options": {
-            "NNUE": "train/experiment-18/wdl_0.25_lr_0.00100_gamma_0.50_3/experiment-240/quantised.bin"
-        },
-    },
-    {
-        "label": "experiment-18-4",
-        "options": {
-            "NNUE": "train/experiment-18/wdl_0.25_lr_0.00100_gamma_0.50_4/experiment-240/quantised.bin"
-        },
-    },
+    "nnue-19-0",
+    # "nnue-19-1",
+    # "nnue-19-2",
+    # "nnue-19-3",
+    # "nnue-19-4",
+    "nnue-20-0-0",
+    # "nnue-20-0-1",
+    # "nnue-21-0",
+    # "nnue-21-1",
+    # "nnue-22-0",
+    # "nnue-22-1",
+    # "nnue-22-2",
+    "nnue-22-3",
+    "nnue-22-4",
 ]
 
 
