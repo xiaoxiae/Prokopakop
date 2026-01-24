@@ -11,10 +11,13 @@ use crate::game::pieces::{Color, Piece};
 
 use super::history::History;
 use super::limits::SearchLimits;
+use super::params::{
+    ASPIRATION_EXPAND, ASPIRATION_INITIAL, ASPIRATION_MIN, DELTA_PRUNING_MARGIN,
+    EXT_FUTILITY_MULTIPLIER, LMR_DIVISOR, LMR_MIN_DEPTH, LMR_MOVE_INDEX, NULL_MOVE_DEPTH_THRESHOLD,
+    NULL_MOVE_MIN_DEPTH, NULL_MOVE_REDUCTION, futility_margin, razoring_margin,
+    reverse_futility_margin,
+};
 use super::results::{SearchResult, SearchStats};
-
-const FUTILITY_MARGIN: [f32; 4] = [0.0, 200.0, 400.0, 600.0];
-const REVERSE_FUTILITY_MARGIN: [f32; 4] = [0.0, 150.0, 300.0, 500.0];
 
 /// Main search struct containing all search state
 pub struct Search<'a> {
@@ -231,7 +234,7 @@ impl<'a> Search<'a> {
         // Reverse futility pruning (static eval pruning)
         // If our position is so good that even with a margin we're above beta, we can return
         if !is_pv_node && !in_check && depth <= 3 && beta.abs() < CHECKMATE_SCORE - 1000.0 {
-            let margin = REVERSE_FUTILITY_MARGIN[depth.min(3)];
+            let margin = reverse_futility_margin(depth);
             if static_eval - margin >= beta {
                 return SearchResult::leaf(beta);
             }
@@ -244,14 +247,9 @@ impl<'a> Search<'a> {
             && depth >= 1
             && alpha.abs() < CHECKMATE_SCORE - 1000.0
         {
-            let razoring_margin = match depth {
-                1 => 300.0,
-                2 => 450.0,
-                3 => 600.0,
-                _ => 0.0,
-            };
+            let margin = razoring_margin(depth);
 
-            if static_eval + razoring_margin < alpha {
+            if static_eval + margin < alpha {
                 // Do a quiescence search to verify the position is really bad
                 let q_result = self.quiescence_search(ply, alpha, beta);
 
@@ -266,7 +264,7 @@ impl<'a> Search<'a> {
         // Don't try null move if we're way below beta
         // Also don't do this in king and pawn endgames
         if !is_pv_node
-            && depth >= 3
+            && depth >= NULL_MOVE_MIN_DEPTH
             && !in_check
             && beta.abs() < CHECKMATE_SCORE - 1000.0
             && static_eval >= beta
@@ -277,7 +275,7 @@ impl<'a> Search<'a> {
         {
             self.game.make_null_move();
 
-            let r = 2 + (depth >= 6) as usize;
+            let r = NULL_MOVE_REDUCTION + (depth >= NULL_MOVE_DEPTH_THRESHOLD) as usize;
             let null_result = self.alpha_beta(
                 depth.saturating_sub(1 + r),
                 ply + 1,
@@ -294,18 +292,16 @@ impl<'a> Search<'a> {
         }
 
         // Check if futility pruning can be applied to this node
-        let futility_pruning_enabled = !is_pv_node
-            && !in_check
-            && depth <= FUTILITY_MARGIN.len() - 1
-            && alpha.abs() < CHECKMATE_SCORE - 1000.0;
+        let futility_pruning_enabled =
+            !is_pv_node && !in_check && depth <= 3 && alpha.abs() < CHECKMATE_SCORE - 1000.0;
 
-        let futility_margin = if futility_pruning_enabled {
-            FUTILITY_MARGIN[depth.min(FUTILITY_MARGIN.len() - 1)]
+        let fut_margin = if futility_pruning_enabled {
+            futility_margin(depth)
         } else {
             f32::INFINITY
         };
 
-        let can_prune_node = futility_pruning_enabled && static_eval + futility_margin <= alpha;
+        let can_prune_node = futility_pruning_enabled && static_eval + fut_margin <= alpha;
 
         let (move_count, mut moves) = self.game.get_moves();
 
@@ -357,8 +353,8 @@ impl<'a> Search<'a> {
             if futility_pruning_enabled && depth >= 2 && is_quiet_move && quiet_moves_searched >= 3
             {
                 // Use a more aggressive margin for individual move pruning
-                let move_futility_margin = futility_margin * 1.5;
-                if static_eval + move_futility_margin <= alpha {
+                let move_fut_margin = fut_margin * EXT_FUTILITY_MULTIPLIER;
+                if static_eval + move_fut_margin <= alpha {
                     quiet_moves_searched += 1;
                     continue;
                 }
@@ -397,15 +393,15 @@ impl<'a> Search<'a> {
                 }
             } else {
                 // Late move reduction for non-PV moves
-                if move_index >= 3
-                    && depth >= 3
+                if move_index >= LMR_MOVE_INDEX
+                    && depth >= LMR_MIN_DEPTH
                     && is_quiet_move
                     && !in_check
                     && !self.game.is_king_in_check(!self.game.side)
                 {
                     // More reduction for late moves and high depths
                     let mut reduction =
-                        ((depth as f32).ln() * (move_index as f32).ln() / 2.0) as usize;
+                        ((depth as f32).ln() * (move_index as f32).ln() / LMR_DIVISOR) as usize;
                     reduction = reduction.clamp(1, depth - 1);
 
                     // Reduce less in PV nodes (when window is wider)
@@ -536,8 +532,10 @@ impl<'a> Search<'a> {
             return self.alpha_beta(depth, 1, -f32::INFINITY, f32::INFINITY, previous_pv);
         }
 
-        // Exponential narrowing: starting 50 and approaching 25 at higher depths
-        let initial_window = (50.0 * 0.25_f32.powf((depth as f32 - 4.0) / 10.0)).max(25.0);
+        // Exponential narrowing: starting at initial and approaching min at higher depths
+        let initial_window = (ASPIRATION_INITIAL
+            * (ASPIRATION_MIN / ASPIRATION_INITIAL).powf((depth as f32 - 4.0) / 10.0))
+        .max(ASPIRATION_MIN);
 
         let mut alpha = previous_score - initial_window;
         let mut beta = previous_score + initial_window;
@@ -612,7 +610,7 @@ impl<'a> Search<'a> {
                 }
 
                 let delta = previous_score - alpha;
-                alpha = previous_score - delta * 2.5;
+                alpha = previous_score - delta * ASPIRATION_EXPAND;
             } else if result.evaluation >= beta {
                 fail_high_count += 1;
                 fail_low_count = 0;
@@ -645,7 +643,7 @@ impl<'a> Search<'a> {
                 }
 
                 let delta = beta - previous_score;
-                beta = previous_score + delta * 2.5;
+                beta = previous_score + delta * ASPIRATION_EXPAND;
             } else {
                 return result;
             }
@@ -714,8 +712,8 @@ impl<'a> Search<'a> {
                     let max_gain = self.calculate_delta_margin(&board_move);
 
                     // Delta pruning: if even the best possible outcome can't improve alpha,
-                    // skip this move; margin is about half a pawn (we're aggressive)
-                    if stand_pat + max_gain + get_piece_value(Piece::Pawn) / 2.0 < alpha {
+                    // skip this move; margin is tunable (default about half a pawn)
+                    if stand_pat + max_gain + DELTA_PRUNING_MARGIN < alpha {
                         continue;
                     }
                 }
