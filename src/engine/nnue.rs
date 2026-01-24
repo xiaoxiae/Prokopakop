@@ -2,7 +2,8 @@ use std::fs;
 use std::path::Path;
 use std::sync::OnceLock;
 
-const HIDDEN_SIZE: usize = 128;
+const HIDDEN_SIZE: usize = 1024;
+const NUM_OUTPUT_BUCKETS: usize = 8;
 const SCALE: i32 = 400;
 const QA: i16 = 255;
 const QB: i16 = 64;
@@ -20,6 +21,16 @@ fn screlu(x: i16) -> i32 {
     y * y
 }
 
+#[inline]
+/// Calculate output bucket based on material count (all pieces on board).
+/// Uses the same formula as Bullet's MaterialCount<8>:
+///   bucket = (piece_count - 2) / divisor
+/// where divisor = ceil(32 / NUM_BUCKETS) = 4 for 8 buckets
+fn get_output_bucket(piece_count: u32) -> usize {
+    const DIVISOR: u32 = 32u32.div_ceil(NUM_OUTPUT_BUCKETS as u32); // = 4
+    ((piece_count.saturating_sub(2)) / DIVISOR).min(NUM_OUTPUT_BUCKETS as u32 - 1) as usize
+}
+
 /// This is the quantised format that bullet outputs.
 #[repr(C)]
 pub struct Network {
@@ -29,38 +40,45 @@ pub struct Network {
     /// Vector with dimension `HIDDEN_SIZE`.
     /// Values have quantization of QA.
     feature_bias: Accumulator,
-    /// Column-Major `1 x (2 * HIDDEN_SIZE)`
-    /// matrix, we use it like this to make the
-    /// code nicer in `Network::evaluate`.
+    /// Transposed layout: [bucket][hidden_neuron] for efficient bucket access.
+    /// Shape: NUM_OUTPUT_BUCKETS rows x (2 * HIDDEN_SIZE) cols
     /// Values have quantization of QB.
-    output_weights: [i16; 2 * HIDDEN_SIZE],
-    /// Scalar output bias.
-    /// Value has quantization of QA * QB.
-    output_bias: i16,
+    output_weights: [i16; NUM_OUTPUT_BUCKETS * 2 * HIDDEN_SIZE],
+    /// One bias per bucket.
+    /// Values have quantization of QA * QB.
+    output_bias: [i16; NUM_OUTPUT_BUCKETS],
 }
 
 impl Network {
     /// Calculates the output of the network, starting from the already
     /// calculated hidden layer (done efficiently during makemoves).
-    pub fn evaluate(&self, us: &Accumulator, them: &Accumulator) -> i32 {
+    /// piece_count is the total number of pieces on the board for bucket selection.
+    pub fn evaluate(&self, us: &Accumulator, them: &Accumulator, piece_count: u32) -> i32 {
+        let bucket = get_output_bucket(piece_count);
+
+        // With transposed weights, each bucket's weights are contiguous
+        let bucket_weights_start = bucket * (2 * HIDDEN_SIZE);
+        let bucket_weights =
+            &self.output_weights[bucket_weights_start..bucket_weights_start + 2 * HIDDEN_SIZE];
+
         // Initialise output.
         let mut output = 0;
 
         // Side-To-Move Accumulator -> Output.
-        for (&input, &weight) in us.vals.iter().zip(&self.output_weights[..HIDDEN_SIZE]) {
+        for (&input, &weight) in us.vals.iter().zip(&bucket_weights[..HIDDEN_SIZE]) {
             output += screlu(input) * i32::from(weight);
         }
 
         // Not-Side-To-Move Accumulator -> Output.
-        for (&input, &weight) in them.vals.iter().zip(&self.output_weights[HIDDEN_SIZE..]) {
+        for (&input, &weight) in them.vals.iter().zip(&bucket_weights[HIDDEN_SIZE..]) {
             output += screlu(input) * i32::from(weight);
         }
 
         // Reduce quantization from QA * QA * QB to QA * QB.
         output /= i32::from(QA);
 
-        // Add bias.
-        output += i32::from(self.output_bias);
+        // Add bias for this bucket.
+        output += i32::from(self.output_bias[bucket]);
 
         // Apply eval scale.
         output *= SCALE;
