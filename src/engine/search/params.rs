@@ -6,19 +6,19 @@
 /// Format: NAME, current_value, min, max, description
 
 // Futility pruning margins (centipawns)
-pub const FUTILITY_MARGIN_1: f32 = 50.0; // min: 25, max: 100
-pub const FUTILITY_MARGIN_2: f32 = 246.3; // min: 150, max: 350
-pub const FUTILITY_MARGIN_3: f32 = 624.4; // min: 450, max: 800
+pub const FUTILITY_MARGIN_1: f32 = 51.8; // min: 25, max: 100
+pub const FUTILITY_MARGIN_2: f32 = 218.9; // min: 150, max: 350
+pub const FUTILITY_MARGIN_3: f32 = 647.5; // min: 450, max: 800
 
 // Reverse futility pruning margins (centipawns)
-pub const REVERSE_FUTILITY_MARGIN_1: f32 = 150.8; // min: 75, max: 225
-pub const REVERSE_FUTILITY_MARGIN_2: f32 = 126.1; // min: 50, max: 200
-pub const REVERSE_FUTILITY_MARGIN_3: f32 = 360.8; // min: 200, max: 520
+pub const REVERSE_FUTILITY_MARGIN_1: f32 = 141.4; // min: 75, max: 225
+pub const REVERSE_FUTILITY_MARGIN_2: f32 = 116.1; // min: 50, max: 200
+pub const REVERSE_FUTILITY_MARGIN_3: f32 = 350.3; // min: 200, max: 520
 
 // Razoring margins (centipawns)
-pub const RAZORING_MARGIN_1: f32 = 340.2; // min: 220, max: 460
-pub const RAZORING_MARGIN_2: f32 = 462.3; // min: 320, max: 600
-pub const RAZORING_MARGIN_3: f32 = 752.3; // min: 550, max: 950
+pub const RAZORING_MARGIN_1: f32 = 341.8; // min: 220, max: 460
+pub const RAZORING_MARGIN_2: f32 = 465.9; // min: 320, max: 600
+pub const RAZORING_MARGIN_3: f32 = 790.6; // min: 550, max: 950
 
 // Null move pruning
 pub const NULL_MOVE_REDUCTION: usize = 2; // min: 1, max: 4
@@ -31,14 +31,14 @@ pub const LMR_MIN_DEPTH: usize = 3; // min: 2, max: 5
 pub const LMR_MOVE_INDEX: usize = 3; // min: 2, max: 6
 
 // Extended futility
-pub const EXT_FUTILITY_MULTIPLIER: f32 = 1.2; // min: 0.7, max: 1.8
+pub const EXT_FUTILITY_MULTIPLIER: f32 = 1.4; // min: 0.7, max: 1.8
 
 // Delta pruning (quiescence) - centipawns
-pub const DELTA_PRUNING_MARGIN: f32 = 72.0; // min: 40, max: 110
+pub const DELTA_PRUNING_MARGIN: f32 = 75.3; // min: 40, max: 110
 
 // Aspiration windows
-pub const ASPIRATION_INITIAL: f32 = 55.1; // min: 30, max: 85
-pub const ASPIRATION_MIN: f32 = 16.5; // min: 8, max: 30
+pub const ASPIRATION_INITIAL: f32 = 54.4; // min: 30, max: 85
+pub const ASPIRATION_MIN: f32 = 20.8; // min: 8, max: 30
 pub const ASPIRATION_EXPAND: f32 = 2.7; // min: 1.8, max: 3.6
 
 /// Helper functions for depth-indexed lookups
