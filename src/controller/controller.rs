@@ -1,11 +1,10 @@
 use crate::engine::nnue::load_nnue_from_file;
 use crate::engine::search::history::History;
-use crate::engine::search::limits::SearchLimits;
+use crate::engine::search::limits::{SearchLimits, SearchParams};
 use crate::engine::search::results::SearchResult;
 use crate::engine::search::searcher::Search;
 use crate::engine::table::TranspositionTable;
 use crate::game::board::{BoardMove, BoardMoveExt, Game};
-use crate::game::pieces::Color;
 use std::path::Path;
 
 use fxhash::FxHashMap;
@@ -14,6 +13,7 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 use std::thread::{self, JoinHandle};
+use std::time::Instant;
 
 // I literally have a text file of jokes that I gathered over the years
 // Now there is a chance that somebody actually reads some of them
@@ -42,6 +42,8 @@ pub struct GameController {
     initialized: bool,
     search_thread: Option<JoinHandle<SearchResult>>,
     stop_flag: Arc<AtomicBool>,
+    ponder_flag: Arc<AtomicBool>,
+    search_start: Arc<Mutex<Instant>>,
     tt: Arc<Mutex<TranspositionTable>>,
     used_jokes: Vec<bool>,
     last_search_result: Option<SearchResult>,
@@ -52,165 +54,6 @@ pub enum MoveResultType {
     Success,         // successful move
     InvalidNotation, // wrong algebraic notation
     InvalidMove,     // invalid move
-}
-
-#[derive(Debug, Clone)]
-pub struct SearchParams {
-    pub depth: Option<usize>,        // search to depth x
-    pub movetime: Option<u64>,       // search exactly x milliseconds
-    pub wtime: Option<u64>,          // white has x milliseconds left on clock
-    pub btime: Option<u64>,          // black has x milliseconds left on clock
-    pub winc: Option<u64>,           // white increment per move in milliseconds
-    pub binc: Option<u64>,           // black increment per move in milliseconds
-    pub movestogo: Option<usize>,    // there are x moves to the next time control
-    pub nodes: Option<u64>,          // search x nodes only
-    pub infinite: bool,              // search until "stop" command
-    pub searchmoves: Vec<BoardMove>, // restrict search to these moves only
-}
-
-impl Default for SearchParams {
-    fn default() -> Self {
-        Self {
-            depth: None,
-            movetime: None,
-            wtime: None,
-            btime: None,
-            winc: None,
-            binc: None,
-            movestogo: None,
-            nodes: None,
-            infinite: false,
-            searchmoves: Vec::new(),
-        }
-    }
-}
-
-impl SearchParams {
-    pub fn parse(params: Vec<String>) -> Self {
-        let mut search_params = SearchParams::default();
-        let mut iter = params.iter();
-
-        while let Some(param) = iter.next() {
-            match param.as_str() {
-                "depth" => {
-                    if let Some(value) = iter.next() {
-                        search_params.depth = value.parse().ok();
-                    }
-                }
-                "movetime" => {
-                    if let Some(value) = iter.next() {
-                        search_params.movetime = value.parse().ok();
-                    }
-                }
-                "wtime" => {
-                    if let Some(value) = iter.next() {
-                        search_params.wtime = value.parse().ok();
-                    }
-                }
-                "btime" => {
-                    if let Some(value) = iter.next() {
-                        search_params.btime = value.parse().ok();
-                    }
-                }
-                "winc" => {
-                    if let Some(value) = iter.next() {
-                        search_params.winc = value.parse().ok();
-                    }
-                }
-                "binc" => {
-                    if let Some(value) = iter.next() {
-                        search_params.binc = value.parse().ok();
-                    }
-                }
-                "movestogo" => {
-                    if let Some(value) = iter.next() {
-                        search_params.movestogo = value.parse().ok();
-                    }
-                }
-                "nodes" => {
-                    if let Some(value) = iter.next() {
-                        search_params.nodes = value.parse().ok();
-                    }
-                }
-                "infinite" => {
-                    search_params.infinite = true;
-                }
-                "searchmoves" => {
-                    // Collect all remaining moves
-                    while let Some(move_str) = iter.next() {
-                        // Check if this is another parameter (not a move)
-                        if [
-                            "depth",
-                            "movetime",
-                            "wtime",
-                            "btime",
-                            "winc",
-                            "binc",
-                            "movestogo",
-                            "nodes",
-                            "infinite",
-                        ]
-                        .contains(&move_str.as_str())
-                        {
-                            // Put it back by breaking and letting the outer loop handle it
-                            // Note: This is a simplified approach. In production, you might want
-                            // to handle this differently
-                            break;
-                        }
-
-                        if let Some(board_move) = BoardMove::parse(move_str) {
-                            search_params.searchmoves.push(board_move);
-                        }
-                    }
-                }
-                _ => {
-                    // Unknown parameter, skip
-                    eprintln!("Unknown go parameter: {}", param);
-                }
-            }
-        }
-
-        search_params
-    }
-
-    pub fn calculate_move_time(&self, color: Color, move_overhead: u64) -> Option<u64> {
-        // If movetime is specified, use that (subtract move overhead)
-        if let Some(movetime) = self.movetime {
-            return Some(movetime.saturating_sub(move_overhead));
-        }
-
-        // If infinite search, no time limit
-        if self.infinite {
-            return None;
-        }
-
-        // Get the time and increment for the current side
-        let (time_left, increment) = match color {
-            Color::White => (self.wtime, self.winc.unwrap_or(0)),
-            Color::Black => (self.btime, self.binc.unwrap_or(0)),
-        };
-
-        // If we have time control information
-        if let Some(time) = time_left {
-            let moves_remaining = self.movestogo.unwrap_or(30) as u64; // Assume 30 moves if not specified
-
-            // Apply move overhead - this accounts for network/GUI delays
-            let available_time = time.saturating_sub(move_overhead);
-
-            // Spend most of increment
-            let base_time = available_time / moves_remaining.max(1);
-            let allocated_time = base_time + (increment * 8 / 10);
-
-            // Min 10ms for move (but ensure we don't go below 1ms due to overhead)
-            Some(
-                allocated_time
-                    .max(10)
-                    .saturating_sub(move_overhead.min(allocated_time / 2)),
-            )
-        } else {
-            None
-        }
-    }
 }
 
 type PerftTable = FxHashMap<u64, usize>;
@@ -227,6 +70,8 @@ impl GameController {
             initialized: false,
             search_thread: None,
             stop_flag: Arc::new(AtomicBool::new(false)),
+            ponder_flag: Arc::new(AtomicBool::new(false)),
+            search_start: Arc::new(Mutex::new(Instant::now())),
             tt: Arc::new(Mutex::new(TranspositionTable::new(128))),
             used_jokes: vec![false; JOKES.len()],
             last_search_result: None,
@@ -447,11 +292,21 @@ impl GameController {
 
         let search_params = SearchParams::parse(params);
 
+        // Set ponder flag if this is a ponder search
+        let is_ponder = search_params.ponder;
+        self.ponder_flag.store(is_ponder, Ordering::Relaxed);
+
+        // Reset search start time
+        if let Ok(mut start) = self.search_start.lock() {
+            *start = Instant::now();
+        }
+
         let mut game_clone = self.game.clone();
         let mut history_clone = self.history.clone();
         let stop_flag = Arc::clone(&self.stop_flag);
+        let ponder_flag = Arc::clone(&self.ponder_flag);
+        let search_start = Arc::clone(&self.search_start);
         let move_overhead = self.move_overhead;
-
         // Clone the shared transposition table reference
         let tt = Arc::clone(&self.tt);
 
@@ -474,6 +329,8 @@ impl GameController {
                         &mut *tt_guard,
                         &mut history_clone,
                         uci_info,
+                        search_start,
+                        ponder_flag,
                     );
                     search.run()
                 } else {
@@ -483,7 +340,15 @@ impl GameController {
 
             // Output the best move in UCI format
             if uci_info {
-                println!("bestmove {}", result.best_move.unparse());
+                if result.pv.len() >= 2 {
+                    println!(
+                        "bestmove {} ponder {}",
+                        result.best_move.unparse(),
+                        result.pv[1].unparse()
+                    );
+                } else {
+                    println!("bestmove {}", result.best_move.unparse());
+                }
 
                 if let Ok(mut tt_guard) = tt.lock() {
                     let pruned = tt_guard.prune_old_entries();
@@ -508,6 +373,15 @@ impl GameController {
             }
         }
         None
+    }
+
+    pub fn ponderhit(&mut self) {
+        // Reset the search timer so time management starts fresh from now
+        if let Ok(mut start) = self.search_start.lock() {
+            *start = Instant::now();
+        }
+        // Clear ponder flag so the search thread starts respecting time limits
+        self.ponder_flag.store(false, Ordering::Relaxed);
     }
 
     pub fn wait_for_search(&mut self) -> Option<SearchResult> {

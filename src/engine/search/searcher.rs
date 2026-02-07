@@ -1,4 +1,4 @@
-use std::sync::{Arc, atomic::AtomicBool};
+use std::sync::{Arc, Mutex, atomic::AtomicBool};
 use std::time::Instant;
 
 use crate::engine::evaluate::{
@@ -40,10 +40,12 @@ impl<'a> Search<'a> {
         tt: &'a mut TranspositionTable,
         history: &'a mut History,
         uci_info: bool,
+        search_start: Arc<Mutex<Instant>>,
+        ponder_flag: Arc<AtomicBool>,
     ) -> Self {
         Self {
             game,
-            stats: SearchStats::new(),
+            stats: SearchStats::new(search_start, ponder_flag),
             limits,
             tt,
             history,

@@ -25,6 +25,7 @@ pub struct SearchParams {
     pub movestogo: Option<usize>,    // there are x moves to the next time control
     pub nodes: Option<u64>,          // search x nodes only
     pub infinite: bool,              // search until "stop" command
+    pub ponder: bool,                // search in ponder mode
     pub searchmoves: Vec<BoardMove>, // restrict search to these moves only
 }
 
@@ -40,6 +41,7 @@ impl Default for SearchParams {
             movestogo: None,
             nodes: None,
             infinite: false,
+            ponder: false,
             searchmoves: Vec::new(),
         }
     }
@@ -95,6 +97,9 @@ impl SearchParams {
                 "infinite" => {
                     search_params.infinite = true;
                 }
+                "ponder" => {
+                    search_params.ponder = true;
+                }
                 "searchmoves" => {
                     // Collect all remaining moves
                     while let Some(move_str) = iter.next() {
@@ -109,6 +114,7 @@ impl SearchParams {
                             "movestogo",
                             "nodes",
                             "infinite",
+                            "ponder",
                         ]
                         .contains(&move_str.as_str())
                         {

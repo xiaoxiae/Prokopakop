@@ -8,6 +8,7 @@ pub enum GUICommand {
     SetOption(String, String),         // setoption name <name> value <value>
     Perft(String),                     // go perft <depth>
     Search(Vec<String>),               // go (with params)
+    PonderHit,                         // ponderhit
     Stop,                              // stop
     Quit,                              // quit the program
     Eval,                              // eval - print evaluation
@@ -53,6 +54,7 @@ impl GUICommand {
             ["go", params @ ..] => {
                 GUICommand::Search(params.iter().map(|p| p.to_string()).collect())
             }
+            ["ponderhit"] => GUICommand::PonderHit,
             ["stop"] => GUICommand::Stop,
             ["quit"] => GUICommand::Quit,
             ["eval"] => GUICommand::Eval,
