@@ -1,6 +1,7 @@
 use clap::{Arg, Command};
 use prokopakop::controller::cli::GUICommand;
 use prokopakop::controller::controller::{GameController, MoveResultType};
+use prokopakop::controller::optimize::{OptimizeConfig, run_optimizer};
 use prokopakop::controller::training::{TrainingConfig, TrainingDataGenerator};
 use prokopakop::game::bitboard::generate_magic_bitboards;
 use prokopakop::game::board::BoardMoveExt;
@@ -19,9 +20,15 @@ fn main() {
                 .num_args(0),
         )
         .arg(
-            Arg::new("training")
-                .long("training")
+            Arg::new("selfplay")
+                .long("selfplay")
                 .help("Generate NNUE training data through self-play")
+                .num_args(0),
+        )
+        .arg(
+            Arg::new("optimize")
+                .long("optimize")
+                .help("Run SPSA parameter optimization")
                 .num_args(0),
         )
         .arg(
@@ -45,22 +52,57 @@ fn main() {
                 .short('o')
                 .long("output")
                 .value_name("FILE")
-                .help("Output file for training data (default: data/selfplay.txt)")
-                .default_value("data/selfplay.txt"),
+                .help("Output file for selfplay (default: data/selfplay.txt)"),
         )
         .arg(
             Arg::new("start-moves-min")
                 .long("start-moves-min")
                 .value_name("NUM")
                 .help("Minimum number of random starting moves (default: 1)")
-                .default_value("1"),
+                .default_value("6"),
         )
         .arg(
             Arg::new("start-moves-max")
                 .long("start-moves-max")
                 .value_name("NUM")
                 .help("Maximum number of random starting moves (default: 6)")
-                .default_value("6"),
+                .default_value("10"),
+        )
+        // SPSA optimizer arguments
+        .arg(
+            Arg::new("iterations")
+                .long("iterations")
+                .value_name("NUM")
+                .help("Number of SPSA iterations (default: 100)")
+                .default_value("100"),
+        )
+        .arg(
+            Arg::new("tc")
+                .long("tc")
+                .value_name("TC")
+                .help("Time control for optimization games (default: 10+0.1)")
+                .default_value("10+0.1"),
+        )
+        .arg(
+            Arg::new("concurrency")
+                .long("concurrency")
+                .value_name("NUM")
+                .help("Number of concurrent games (default: 8)")
+                .default_value("8"),
+        )
+        .arg(
+            Arg::new("spsa-a")
+                .long("spsa-a")
+                .value_name("FLOAT")
+                .help("SPSA step size (default: 0.1)")
+                .default_value("0.1"),
+        )
+        .arg(
+            Arg::new("spsa-c")
+                .long("spsa-c")
+                .value_name("FLOAT")
+                .help("SPSA perturbation size (default: 0.05)")
+                .default_value("0.05"),
         )
         .get_matches();
 
@@ -70,8 +112,56 @@ fn main() {
         return;
     }
 
-    // Handle training flag
-    if matches.get_flag("training") {
+    // Handle optimize flag
+    if matches.get_flag("optimize") {
+        let iterations = matches
+            .get_one::<String>("iterations")
+            .and_then(|s| s.parse::<u32>().ok())
+            .unwrap();
+
+        let tc = matches
+            .get_one::<String>("tc")
+            .map(|s| s.to_string())
+            .unwrap();
+
+        let concurrency = matches
+            .get_one::<String>("concurrency")
+            .and_then(|s| s.parse::<u32>().ok())
+            .unwrap();
+
+        let a = matches
+            .get_one::<String>("spsa-a")
+            .and_then(|s| s.parse::<f64>().ok())
+            .unwrap();
+
+        let c = matches
+            .get_one::<String>("spsa-c")
+            .and_then(|s| s.parse::<f64>().ok())
+            .unwrap();
+
+        eprintln!("=== SPSA Parameter Optimizer ===");
+        eprintln!("Iterations: {}", iterations);
+        eprintln!("Time control: {}", tc);
+        eprintln!("Concurrency: {}", concurrency);
+        eprintln!("Step size (a): {}", a);
+        eprintln!("Perturbation (c): {}", c);
+        eprintln!();
+
+        let config = OptimizeConfig {
+            iterations,
+            time_control: tc,
+            concurrency,
+            a,
+            c,
+            ..Default::default()
+        };
+
+        run_optimizer(config);
+        return;
+    }
+
+    // Handle selfplay flag
+    if matches.get_flag("selfplay") {
         let num_games = matches
             .get_one::<String>("games")
             .and_then(|s| s.parse::<u32>().ok())
@@ -85,7 +175,7 @@ fn main() {
         let output_file = matches
             .get_one::<String>("output")
             .map(|s| s.as_str())
-            .unwrap();
+            .unwrap_or("data/selfplay.txt");
 
         let start_moves_min = matches
             .get_one::<String>("start-moves-min")
