@@ -194,6 +194,7 @@ fn main() {
 
                 println!("\nNodes: {}", total);
             }
+            GUICommand::PonderHit => controller.ponderhit(),
             GUICommand::Stop => {
                 let _ = controller.stop_search();
             }

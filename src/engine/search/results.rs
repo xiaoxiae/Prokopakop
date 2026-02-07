@@ -1,6 +1,11 @@
 use super::limits::SearchLimits;
 use crate::game::board::{BoardMove, BoardMoveExt};
 use std::fmt::{Display, Formatter, Result};
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicBool, Ordering},
+};
+use std::time::Instant;
 
 #[derive(Debug, Clone)]
 pub struct SearchResult {
@@ -49,15 +54,17 @@ impl SearchResult {
 
 pub struct SearchStats {
     pub nodes: u64,
-    pub start_time: std::time::Instant,
+    pub search_start: Arc<Mutex<Instant>>,
+    pub ponder_flag: Arc<AtomicBool>,
     pub current_depth: u64,
 }
 
 impl SearchStats {
-    pub fn new() -> Self {
+    pub fn new(search_start: Arc<Mutex<Instant>>, ponder_flag: Arc<AtomicBool>) -> Self {
         Self {
             nodes: 0,
-            start_time: std::time::Instant::now(),
+            search_start,
+            ponder_flag,
             current_depth: 0,
         }
     }
@@ -67,28 +74,39 @@ impl SearchStats {
     }
 
     pub fn get_elapsed_ms(&self) -> u64 {
-        self.start_time.elapsed().as_millis() as u64
-    }
-
-    pub fn get_nps(&self) -> u64 {
-        let elapsed_secs = self.start_time.elapsed().as_secs_f64();
-        if elapsed_secs > 0.0 {
-            (self.nodes as f64 / elapsed_secs) as u64
+        if let Ok(start) = self.search_start.lock() {
+            start.elapsed().as_millis() as u64
         } else {
             0
         }
     }
 
-    pub fn should_stop(
-        &self,
-        limits: &SearchLimits,
-        stop_flag: &std::sync::Arc<std::sync::atomic::AtomicBool>,
-    ) -> bool {
-        use std::sync::atomic::Ordering;
+    pub fn get_nps(&self) -> u64 {
+        if let Ok(start) = self.search_start.lock() {
+            let elapsed_secs = start.elapsed().as_secs_f64();
+            if elapsed_secs > 0.0 {
+                (self.nodes as f64 / elapsed_secs) as u64
+            } else {
+                0
+            }
+        } else {
+            0
+        }
+    }
 
+    fn is_pondering(&self) -> bool {
+        self.ponder_flag.load(Ordering::Relaxed)
+    }
+
+    pub fn should_stop(&self, limits: &SearchLimits, stop_flag: &Arc<AtomicBool>) -> bool {
         // Check external stop flag
         if stop_flag.load(Ordering::Relaxed) {
             return true;
+        }
+
+        // While pondering, don't stop due to time/node limits
+        if self.is_pondering() {
+            return false;
         }
 
         if limits.infinite {
@@ -114,8 +132,12 @@ impl SearchStats {
         false
     }
 
-    // New: Check if we have enough time for another iteration
     pub fn has_time_for_iteration(&self, limits: &SearchLimits, last_iteration_ms: u64) -> bool {
+        // While pondering, always continue
+        if self.is_pondering() {
+            return true;
+        }
+
         if limits.infinite {
             return true;
         }
