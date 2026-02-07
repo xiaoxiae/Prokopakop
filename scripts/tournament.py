@@ -43,8 +43,8 @@ BINARIES: list[str | dict[str, str | dict[str, str]]] = [
     # "910fb21",  # DP + NMP tuning
     # "c056f9b",  # SEE
     # "9119428",  # razoring
-    "3f0d5f5",  # good NNUE
-    "fb7ccfe",
+    # "3f0d5f5",  # good NNUE
+    # "fb7ccfe",
     # {"label": "current", "options": {"NNUE": "data/nnue.bin"}},
     # {
     #     "label": "experiment-9-0",
@@ -134,12 +134,12 @@ BINARIES: list[str | dict[str, str | dict[str, str]]] = [
     #     "label": "experiment-14-3",
     #     "options": {"NNUE": "train/experiment-14/wdl_0.25_lr_0.00100_gamma_0.50_3/experiment-240/quantised.bin"}
     # },
-    {
-        "label": "experiment-15-0",
-        "options": {
-            "NNUE": "train/experiment-15/wdl_0.25_lr_0.00100_gamma_0.50_0/experiment-240/quantised.bin"
-        },
-    },
+    # {
+    #     "label": "experiment-15-0",
+    #     "options": {
+    #         "NNUE": "train/experiment-15/wdl_0.25_lr_0.00100_gamma_0.50_0/experiment-240/quantised.bin"
+    #     },
+    # },
     # {
     #     "label": "experiment-15-1",
     #     "options": {
@@ -202,6 +202,14 @@ BINARIES: list[str | dict[str, str | dict[str, str]]] = [
     # "nnue-22-2",
     "nnue-22-3",
     "nnue-22-4",
+    "2b54915",
+    "3ec2d15",
+    "be21c02",
+    "nnue-23-0",
+    "nnue-23-1",
+    "nnue-23-2",
+    "nnue-23-3",
+    "nnue-23-4",
 ]
 
 
