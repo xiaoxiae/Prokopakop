@@ -342,9 +342,11 @@ impl<'a> Search<'a> {
         for (move_index, board_move) in moves[0..move_count].iter().enumerate() {
             let is_capture = self.game.is_capture(*board_move);
             let is_promotion = board_move.get_promotion().is_some();
-            let gives_check = self.game.is_check(*board_move);
 
-            let is_quiet_move = !is_capture && !is_promotion && !gives_check;
+            // is_check() does a full make/unmake (with NNUE accumulator updates),
+            // so only evaluate it for moves that could still be quiet. Captures and
+            // promotions are non-quiet regardless, so short-circuit before that cost.
+            let is_quiet_move = !is_capture && !is_promotion && !self.game.is_check(*board_move);
 
             // Futility pruning: Skip quiet moves if position is hopeless
             if moves_searched > 0 && can_prune_node && is_quiet_move {

@@ -122,10 +122,12 @@ impl SearchStats {
             }
         }
 
-        // Check time limit
-        if let Some(max_time_ms) = limits.max_time_ms {
-            if self.get_elapsed_ms() >= max_time_ms {
-                return true;
+        // Check time limit only ever so often
+        if self.nodes & 2047 == 0 {
+            if let Some(max_time_ms) = limits.max_time_ms {
+                if self.get_elapsed_ms() >= max_time_ms {
+                    return true;
+                }
             }
         }
 
