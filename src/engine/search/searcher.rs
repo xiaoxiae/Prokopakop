@@ -401,7 +401,6 @@ impl<'a> Search<'a> {
                     && depth >= LMR_MIN_DEPTH
                     && is_quiet_move
                     && !in_check
-                    && !self.game.is_king_in_check(!self.game.side)
                 {
                     // More reduction for late moves and high depths
                     let mut reduction =
