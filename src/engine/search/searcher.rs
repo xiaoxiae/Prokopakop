@@ -1,5 +1,8 @@
-use std::sync::{Arc, Mutex, atomic::AtomicBool};
-use std::time::Instant;
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicBool, Ordering},
+};
+use std::time::{Duration, Instant};
 
 use crate::engine::evaluate::{
     CHECKMATE_SCORE, QUEEN_VALUE, calculate_game_phase, get_piece_value,
@@ -61,10 +64,10 @@ impl<'a> Search<'a> {
         let mut previous_pv: Vec<BoardMove> = Vec::new();
         let mut last_iteration_ms = 0u64;
 
-        // If only one move is available, return it immediately
         let (count, moves) = self.game.get_moves();
 
-        if count == 1 && !self.limits.exact {
+        // If only one move is available, return it immediately (unless we are pondering)
+        if count == 1 && !self.limits.exact && !self.stats.is_pondering() {
             let best_move = moves[0];
             let pv = vec![best_move];
             if self.uci_info {
@@ -132,6 +135,11 @@ impl<'a> Search<'a> {
                 }
                 break;
             }
+        }
+
+        // Do not stop searching when pondering, the UI will tell us when to stop
+        while self.stats.is_pondering() && !self.stop_flag.load(Ordering::Relaxed) {
+            std::thread::sleep(Duration::from_millis(1));
         }
 
         // Always return the best move from the last completed iteration

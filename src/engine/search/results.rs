@@ -94,7 +94,7 @@ impl SearchStats {
         }
     }
 
-    fn is_pondering(&self) -> bool {
+    pub fn is_pondering(&self) -> bool {
         self.ponder_flag.load(Ordering::Relaxed)
     }
 
