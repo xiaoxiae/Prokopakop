@@ -278,6 +278,9 @@ pub struct Game {
     // NNUE accumulators: white perspective and black perspective (vertically mirrored + color flipped)
     pub white_accumulator: Accumulator,
     pub black_accumulator: Accumulator,
+
+    // Lazy updates (only when things change...)
+    pub update_nnue: bool,
 }
 
 impl Game {
@@ -337,6 +340,7 @@ impl Game {
             all_pieces: Bitboard::default(),
             white_accumulator: Accumulator::new(net),
             black_accumulator: Accumulator::new(net),
+            update_nnue: true,
         };
 
         let mut y = 0u32;
@@ -518,12 +522,14 @@ impl Game {
         self.zobrist_key ^= ZOBRIST_TABLE.pieces[color as usize][piece as usize][square as usize];
 
         // Update NNUE accumulators
-        let net = get_network();
-        let square_u8 = square as u8;
-        let white_idx = Self::calculate_white_feature_idx(square_u8, piece, color);
-        let black_idx = Self::calculate_black_feature_idx(square_u8, piece, color);
-        self.white_accumulator.remove_feature(white_idx, net);
-        self.black_accumulator.remove_feature(black_idx, net);
+        if self.update_nnue {
+            let net = get_network();
+            let square_u8 = square as u8;
+            let white_idx = Self::calculate_white_feature_idx(square_u8, piece, color);
+            let black_idx = Self::calculate_black_feature_idx(square_u8, piece, color);
+            self.white_accumulator.remove_feature(white_idx, net);
+            self.black_accumulator.remove_feature(black_idx, net);
+        }
     }
 
     fn set_piece(&mut self, square: BoardSquare, colored_piece @ (piece, color): ColoredPiece) {
@@ -540,12 +546,14 @@ impl Game {
         self.zobrist_key ^= ZOBRIST_TABLE.pieces[color as usize][piece as usize][square as usize];
 
         // Update NNUE accumulators
-        let net = get_network();
-        let square_u8 = square as u8;
-        let white_idx = Self::calculate_white_feature_idx(square_u8, piece, color);
-        let black_idx = Self::calculate_black_feature_idx(square_u8, piece, color);
-        self.white_accumulator.add_feature(white_idx, net);
-        self.black_accumulator.add_feature(black_idx, net);
+        if self.update_nnue {
+            let net = get_network();
+            let square_u8 = square as u8;
+            let white_idx = Self::calculate_white_feature_idx(square_u8, piece, color);
+            let black_idx = Self::calculate_black_feature_idx(square_u8, piece, color);
+            self.white_accumulator.add_feature(white_idx, net);
+            self.black_accumulator.add_feature(black_idx, net);
+        }
     }
 
     // EWW duplication!!!
@@ -565,12 +573,14 @@ impl Game {
         self.zobrist_key ^= ZOBRIST_TABLE.pieces[C::COLOR_INDEX][P::PIECE_INDEX][square as usize];
 
         // Update NNUE accumulators
-        let net = get_network();
-        let square_u8 = square as u8;
-        let white_idx = Self::calculate_white_feature_idx(square_u8, P::PIECE, C::COLOR);
-        let black_idx = Self::calculate_black_feature_idx(square_u8, P::PIECE, C::COLOR);
-        self.white_accumulator.add_feature(white_idx, net);
-        self.black_accumulator.add_feature(black_idx, net);
+        if self.update_nnue {
+            let net = get_network();
+            let square_u8 = square as u8;
+            let white_idx = Self::calculate_white_feature_idx(square_u8, P::PIECE, C::COLOR);
+            let black_idx = Self::calculate_black_feature_idx(square_u8, P::PIECE, C::COLOR);
+            self.white_accumulator.add_feature(white_idx, net);
+            self.black_accumulator.add_feature(black_idx, net);
+        }
     }
 
     fn update_turn(&mut self, delta: isize) {
@@ -1542,9 +1552,11 @@ impl Game {
     }
 
     pub(crate) fn is_check(&mut self, board_move: BoardMove) -> bool {
+        self.update_nnue = false;
         self.make_move(board_move);
         let is_check = self.is_king_in_check(!self.side);
         self.unmake_move();
+        self.update_nnue = true;
         is_check
     }
 
