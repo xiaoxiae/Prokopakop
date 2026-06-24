@@ -227,10 +227,11 @@ impl<'a> Search<'a> {
             return self.quiescence_search(ply, alpha, beta);
         }
 
-        let static_eval = if !in_check {
+        // We currently don't use static eval for PV search; REMOVE once we do
+        let static_eval = if !in_check && !is_pv_node {
             self.game.evaluate() * self.game.side
         } else {
-            -f32::INFINITY // Don't use static eval when in check
+            -f32::INFINITY // Unused when in check or in a PV node
         };
 
         // Reverse futility pruning (static eval pruning)
