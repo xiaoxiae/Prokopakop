@@ -781,7 +781,7 @@ impl<'a> Search<'a> {
         pv_move: Option<BoardMove>,
         killer_moves: [BoardMove; 2],
     ) {
-        moves.sort_unstable_by_key(|&mv| {
+        moves.sort_by_cached_key(|&mv| {
             if Some(mv) == pv_move {
                 -1_000_000
             } else if Some(mv) == tt_move {
