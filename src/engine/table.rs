@@ -90,6 +90,20 @@ impl TranspositionTable {
         (key as usize) % self.bucket_count
     }
 
+    #[inline(always)]
+    pub fn prefetch(&self, key: u64) {
+        let idx = self.get_bucket_index(key);
+        let ptr = unsafe { self.buckets.as_ptr().add(idx) } as *const i8;
+
+        #[cfg(target_arch = "x86_64")]
+        unsafe {
+            use std::arch::x86_64::{_MM_HINT_T0, _mm_prefetch};
+            _mm_prefetch::<{ _MM_HINT_T0 }>(ptr);
+        }
+        #[cfg(not(target_arch = "x86_64"))]
+        let _ = ptr;
+    }
+
     pub fn probe(&self, key: u64) -> Option<TTEntry> {
         let bucket_idx = self.get_bucket_index(key);
         let bucket = &self.buckets[bucket_idx];

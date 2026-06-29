@@ -376,6 +376,9 @@ impl<'a> Search<'a> {
             self.game.make_move(*board_move);
 
             let new_zobrist = self.game.zobrist_key;
+
+            // We know the key now -- can already pre-fetch for when we recurse
+            self.tt.prefetch(new_zobrist);
             self.history.push_position(new_zobrist);
 
             // Pass the PV for the next ply
