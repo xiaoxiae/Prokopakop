@@ -235,14 +235,15 @@ const fn calculate_attack_bitboards_for_pieces() -> ValidMoveBitboards {
     bitboards
 }
 
-pub(crate) const PIECE_MOVE_BITBOARDS: ValidMoveBitboards = calculate_attack_bitboards_for_pieces();
+pub(crate) static PIECE_MOVE_BITBOARDS: ValidMoveBitboards =
+    calculate_attack_bitboards_for_pieces();
 
 pub(crate) const MAGIC_ROOK_BLOCKER_BITBOARD: PieceBitboards =
     calculate_blocker_bitboards(get_attack_piece_deltas(&Piece::Rook, 0));
 pub(crate) const MAGIC_BISHOP_BLOCKER_BITBOARD: PieceBitboards =
     calculate_blocker_bitboards(get_attack_piece_deltas(&Piece::Bishop, 0));
 
-pub(crate) const MAGIC_BLOCKER_BITBOARD: [Bitboard; 128] = {
+pub(crate) static MAGIC_BLOCKER_BITBOARD: [Bitboard; 128] = {
     let mut combined = [0u64; 128];
     let mut i = 0;
 
@@ -425,7 +426,7 @@ fn serialize_magic_bitboards_to_file_flat<P: AsRef<Path>>(
     writeln!(file)?;
 
     // combined data for accessing magic table (magic_number, start_offset, shift)
-    writeln!(file, "pub const MAGIC_TABLE: [(u64, usize, u8); 128] = [")?;
+    writeln!(file, "pub static MAGIC_TABLE: [(u64, usize, u8); 128] = [")?;
     for (i, &(magic, offset, shift)) in magic_table.iter().enumerate() {
         write!(file, "    ({:#018x}, {}, {})", magic, offset, shift)?;
         if i < magic_table.len() - 1 {
@@ -438,7 +439,7 @@ fn serialize_magic_bitboards_to_file_flat<P: AsRef<Path>>(
 
     writeln!(
         file,
-        "pub const MAGIC_ENTRIES: [Bitboard; {}] = [",
+        "pub static MAGIC_ENTRIES: [Bitboard; {}] = [",
         all_entries.len()
     )?;
     for (i, entry) in all_entries.iter().enumerate() {

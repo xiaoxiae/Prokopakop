@@ -1,7 +1,7 @@
 // This file is auto-generated. Do not edit manually.
 use crate::game::bitboard::Bitboard;
 
-pub const MAGIC_TABLE: [(u64, usize, u8); 128] = [
+pub static MAGIC_TABLE: [(u64, usize, u8); 128] = [
     (0x0b80041124804000, 0, 52),
     (0x4040200010014000, 4096, 53),
     (0x8100200100184010, 6144, 53),
@@ -132,7 +132,7 @@ pub const MAGIC_TABLE: [(u64, usize, u8); 128] = [
     (0x0143206104009058, 107460, 58),
 ];
 
-pub const MAGIC_ENTRIES: [Bitboard; 107522] = [
+pub static MAGIC_ENTRIES: [Bitboard; 107522] = [
     0x01010101010101fe,
     0x000000000000010e,
     0x0000000001010102,
