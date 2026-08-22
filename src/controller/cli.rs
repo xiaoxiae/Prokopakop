@@ -1,18 +1,27 @@
 use std::io;
 
+pub enum PositionStart {
+    StartPos,
+    Fen(String),
+}
+
 pub enum GUICommand {
     UCI,
     IsReady,
-    FenPosition(String),               // position fen <fen>
-    MovePosition(Option<Vec<String>>), // position startpos <maybe some moves>
-    SetOption(String, String),         // setoption name <name> value <value>
-    Perft(String),                     // go perft <depth>
-    Search(Vec<String>),               // go (with params)
-    PonderHit,                         // ponderhit
-    Stop,                              // stop
-    Quit,                              // quit the program
-    Eval,                              // eval - print evaluation
-    Joke,                              // joke - tell a random joke
+    UciNewGame, // ucinewgame
+    Position {
+        // position (startpos | fen <fen/epd>) [moves <move> ...]
+        start: PositionStart,
+        moves: Vec<String>,
+    },
+    SetOption(String, String), // setoption name <name> value <value>
+    Perft(String),             // go perft <depth>
+    Search(Vec<String>),       // go (with params)
+    PonderHit,                 // ponderhit
+    Stop,                      // stop
+    Quit,                      // quit the program
+    Eval,                      // eval - print evaluation
+    Joke,                      // joke - tell a random joke
 
     Invalid(String), // placeholder for invalid commands so we can pattern match
 }
@@ -39,14 +48,8 @@ impl GUICommand {
         match parts.as_slice() {
             ["uci"] => GUICommand::UCI,
             ["isready"] => GUICommand::IsReady,
-            ["ucinewgame"] => GUICommand::MovePosition(None),
-            ["position", "startpos"] => GUICommand::MovePosition(None),
-            ["position", "startpos", "moves", moves @ ..] => {
-                GUICommand::MovePosition(Some(moves.iter().map(|m| m.to_string()).collect()))
-            }
-            ["position", "fen", fen @ ..] if !fen.is_empty() => {
-                GUICommand::FenPosition(fen.join(" "))
-            }
+            ["ucinewgame"] => GUICommand::UciNewGame,
+            ["position", rest @ ..] if !rest.is_empty() => Self::parse_position(rest),
             ["setoption", "name", name_and_rest @ ..] if !name_and_rest.is_empty() => {
                 Self::parse_setoption(name_and_rest)
             }
@@ -60,6 +63,25 @@ impl GUICommand {
             ["eval"] => GUICommand::Eval,
             ["joke"] => GUICommand::Joke,
             _ => GUICommand::Invalid(input),
+        }
+    }
+
+    fn parse_position(parts: &[&str]) -> GUICommand {
+        let (head, moves) = match parts.iter().position(|&part| part == "moves") {
+            Some(i) => (&parts[..i], &parts[i + 1..]),
+            None => (parts, &[] as &[&str]),
+        };
+
+        let start = match head {
+            ["startpos", ..] => PositionStart::StartPos,
+            ["fen", fen @ ..] if !fen.is_empty() => PositionStart::Fen(fen.join(" ")),
+            [] => return GUICommand::Invalid("position with no starting position".to_string()),
+            fen => PositionStart::Fen(fen.join(" ")),
+        };
+
+        GUICommand::Position {
+            start,
+            moves: moves.iter().map(|m| m.to_string()).collect(),
         }
     }
 

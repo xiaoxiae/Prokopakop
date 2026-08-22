@@ -1,6 +1,6 @@
 use clap::{Arg, Command};
 use prokopakop::controller::cli::GUICommand;
-use prokopakop::controller::controller::{GameController, MoveResultType};
+use prokopakop::controller::controller::GameController;
 use prokopakop::controller::optimize::{OptimizeConfig, run_optimizer};
 use prokopakop::controller::training::{TrainingConfig, TrainingDataGenerator};
 use prokopakop::game::bitboard::generate_magic_bitboards;
@@ -248,24 +248,10 @@ fn main() {
                 // Ignore commands until UCI initialization
                 continue;
             }
-            GUICommand::FenPosition(fen) => controller.set_board_from_fen(fen.as_str()),
-            GUICommand::MovePosition(moves) => {
-                controller.reset_board();
-
-                if let Some(moves_strings) = moves {
-                    for notation in moves_strings {
-                        match controller.try_move_piece(&notation) {
-                            MoveResultType::Success => (),
-                            MoveResultType::InvalidMove => {
-                                eprintln!("Invalid move: {}", notation);
-                            }
-                            MoveResultType::InvalidNotation => {
-                                eprintln!("Invalid notation format: {}", notation);
-                            }
-                        }
-                    }
-                } else {
-                    controller.reset_transposition_table();
+            GUICommand::UciNewGame => controller.new_game(),
+            GUICommand::Position { start, moves } => {
+                if let Err(error) = controller.set_position(start, &moves) {
+                    eprintln!("{}", error);
                 }
             }
             GUICommand::SetOption(name, value) => {

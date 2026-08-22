@@ -1,3 +1,4 @@
+use crate::controller::cli::PositionStart;
 use crate::engine::nnue::load_nnue_from_file;
 use crate::engine::search::history::History;
 use crate::engine::search::limits::{SearchLimits, SearchParams};
@@ -84,10 +85,41 @@ impl GameController {
         self.history.push_position(self.game.zobrist_key);
     }
 
-    pub fn set_board_from_fen(&mut self, fen: &str) {
-        self.game = Game::new(Some(fen));
+    pub fn set_board_from_fen(&mut self, fen: &str) -> Result<(), String> {
+        self.game = Game::from_fen(fen)?;
         self.history = History::new();
         self.history.push_position(self.game.zobrist_key);
+
+        Ok(())
+    }
+
+    pub fn set_position(&mut self, start: PositionStart, moves: &[String]) -> Result<(), String> {
+        self.stop_search();
+
+        match start {
+            PositionStart::StartPos => self.reset_board(),
+            PositionStart::Fen(fen) => self.set_board_from_fen(&fen)?,
+        }
+
+        for notation in moves {
+            match self.try_move_piece(notation) {
+                MoveResultType::Success => (),
+                MoveResultType::InvalidMove => {
+                    return Err(format!("Invalid move: {}", notation));
+                }
+                MoveResultType::InvalidNotation => {
+                    return Err(format!("Invalid notation format: {}", notation));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn new_game(&mut self) {
+        self.stop_search();
+        self.reset_board();
+        self.reset_transposition_table();
     }
 
     pub fn reset_transposition_table(&mut self) {

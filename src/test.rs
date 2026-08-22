@@ -11,9 +11,11 @@ mod tests {
     fn test_null_move() {
         let mut controller = GameController::new();
 
-        controller.set_board_from_fen(
-            "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
-        );
+        controller
+            .set_board_from_fen(
+                "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+            )
+            .unwrap();
 
         let original_hash = controller.game.zobrist_key;
 
@@ -40,7 +42,7 @@ mod tests {
             println!("Testing Zobrist consistency for: {}", position);
 
             controller.reset_board();
-            controller.set_board_from_fen(position);
+            controller.set_board_from_fen(position).unwrap();
 
             let mut zobrist_position_map: HashMap<u64, String> = HashMap::new();
             let mut path = Vec::new();
@@ -240,7 +242,7 @@ mod tests {
             "rnbq1k1r/pp1Pbppp/2p5/8/2B5/8/PPP1NnPP/RNBQK2R w KQ - 1 8",
             "r4rk1/1pp1qppp/p1np1n2/2b1p1B1/2B1P1b1/P1NP1N2/1PP1QPPP/R4RK1 w - - 0 10",
         ] {
-            controller.set_board_from_fen(position);
+            controller.set_board_from_fen(position).unwrap();
 
             // Get the FEN back from the game
             let generated_fen = controller.game.get_fen();
@@ -301,7 +303,7 @@ mod tests {
 
         // Test with a complete standard starting position
         let starting_fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
-        controller.set_board_from_fen(starting_fen);
+        controller.set_board_from_fen(starting_fen).unwrap();
         let generated = controller.game.get_fen();
         assert_eq!(starting_fen, generated, "Starting position FEN mismatch");
     }
@@ -363,7 +365,7 @@ mod tests {
             .par_iter()
             .map(|(fen, depth, expected_count)| {
                 let mut controller = GameController::new();
-                controller.set_board_from_fen(fen);
+                controller.set_board_from_fen(fen).unwrap();
 
                 let moves = controller.perft(*depth);
 
@@ -435,7 +437,7 @@ mod see_tests {
 
     fn test_see_position(fen: &str, square: &str, expected_score: f32) {
         let mut controller = GameController::new();
-        controller.set_board_from_fen(fen);
+        controller.set_board_from_fen(fen).unwrap();
 
         let square_idx = parse_square(square);
         let actual_score = controller.game.see(square_idx);
@@ -562,5 +564,136 @@ mod see_tests {
             "e5",
             KNIGHT_VALUE - PAWN_VALUE,
         );
+    }
+}
+
+#[cfg(test)]
+mod position_tests {
+    use crate::controller::cli::PositionStart;
+    use crate::controller::controller::GameController;
+    use crate::game::board::Game;
+
+    const START_FEN: &str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+    const OPENING_FEN: &str = "rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 2";
+
+    fn played(start: PositionStart, moves: &[&str]) -> GameController {
+        let mut controller = GameController::new();
+        let moves = moves.iter().map(|m| m.to_string()).collect::<Vec<_>>();
+
+        controller.set_position(start, &moves).unwrap();
+        controller
+    }
+
+    #[test]
+    fn test_fen_with_moves_matches_startpos_with_moves() {
+        let moves = ["e2e4", "e7e5", "g1f3"];
+
+        let from_startpos = played(PositionStart::StartPos, &moves);
+        let from_fen = played(PositionStart::Fen(START_FEN.to_string()), &moves);
+        let directly = played(PositionStart::Fen(OPENING_FEN.to_string()), &[]);
+
+        assert_eq!(from_startpos.game.zobrist_key, from_fen.game.zobrist_key);
+        assert_eq!(from_startpos.game.get_fen(), from_fen.game.get_fen());
+        assert_eq!(from_fen.game.get_fen(), directly.game.get_fen());
+    }
+
+    #[test]
+    fn test_moves_are_applied() {
+        let controller = played(PositionStart::Fen(START_FEN.to_string()), &["e2e4"]);
+
+        assert_ne!(controller.game.get_fen(), START_FEN);
+        assert_eq!(
+            controller.game.get_fen(),
+            "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1"
+        );
+    }
+
+    #[test]
+    fn test_invalid_move_stops_the_move_list() {
+        let mut controller = GameController::new();
+        let moves = ["e2e4", "e2e4", "e7e5"]
+            .iter()
+            .map(|m| m.to_string())
+            .collect::<Vec<_>>();
+
+        assert!(
+            controller
+                .set_position(PositionStart::StartPos, &moves)
+                .is_err()
+        );
+        assert_eq!(
+            controller.game.get_fen(),
+            "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1"
+        );
+    }
+
+    #[test]
+    fn test_invalid_fen_keeps_the_previous_position() {
+        let mut controller = played(PositionStart::Fen(OPENING_FEN.to_string()), &[]);
+
+        assert!(
+            controller
+                .set_position(PositionStart::Fen("totally broken input".to_string()), &[])
+                .is_err()
+        );
+        assert_eq!(controller.game.get_fen(), OPENING_FEN);
+    }
+
+    #[test]
+    fn test_repetitions_come_from_the_move_list() {
+        let shuffle = [
+            "g1f3", "g8f6", "f3g1", "f6g8", "g1f3", "g8f6", "f3g1", "f6g8",
+        ];
+
+        let controller = played(PositionStart::StartPos, &shuffle);
+
+        assert!(
+            controller
+                .history
+                .is_threefold_repetition(controller.game.zobrist_key)
+        );
+    }
+
+    #[test]
+    fn test_from_fen_accepts_epd() {
+        let epd =
+            Game::from_fen("rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq -").unwrap();
+        assert_eq!(
+            epd.get_fen(),
+            "rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 0 1"
+        );
+
+        let with_ops = Game::from_fen(
+            "rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - bm Nc6; id \"x\"; hmvc 1; fmvn 2;",
+        )
+        .unwrap();
+        assert_eq!(with_ops.get_fen(), OPENING_FEN);
+
+        let bare_ops =
+            Game::from_fen("rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - bm Nc6;")
+                .unwrap();
+        assert_eq!(
+            bare_ops.get_fen(),
+            "rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 0 1"
+        );
+    }
+
+    #[test]
+    fn test_from_fen_rejects_garbage() {
+        for fen in [
+            "",
+            "totally broken input",
+            "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR",
+            "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR x KQkq - 0 1",
+            "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq z9 0 1",
+            "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR/8/8 w KQkq - 0 1",
+            "rnbqkbnrx/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+        ] {
+            assert!(
+                Game::from_fen(fen).is_err(),
+                "expected '{}' to be rejected",
+                fen
+            );
+        }
     }
 }

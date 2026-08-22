@@ -96,11 +96,16 @@ impl BoardSquareExt for u8 {
     fn parse(string: &str) -> Option<BoardSquare> {
         let mut chars = string.chars();
 
-        match (chars.next(), chars.next()) {
-            (Some(file), Some(rank)) if file.is_alphabetic() && rank.is_numeric() => Some(
-                BoardSquare::from_position(file as u8 - b'a' as u8, rank as u8 - b'1' as u8),
-            ),
-            (_, _) => None,
+        match (chars.next(), chars.next(), chars.next()) {
+            (Some(file), Some(rank), None)
+                if ('a'..='h').contains(&file) && ('1'..='8').contains(&rank) =>
+            {
+                Some(BoardSquare::from_position(
+                    file as u8 - b'a' as u8,
+                    rank as u8 - b'1' as u8,
+                ))
+            }
+            _ => None,
         }
     }
 

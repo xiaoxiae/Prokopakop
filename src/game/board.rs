@@ -320,10 +320,24 @@ impl Game {
         64 * (nnue_color * 6 + nnue_piece_type) + (mirrored_square as usize)
     }
 
-    pub fn new(fen: Option<&str>) -> Game {
-        let fen_game = fen.unwrap_or("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+    pub const START_FEN: &'static str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
-        let mut parts = fen_game.split_whitespace();
+    pub fn new(fen: Option<&str>) -> Game {
+        match Self::from_fen(fen.unwrap_or(Self::START_FEN)) {
+            Ok(game) => game,
+            Err(error) => panic!("{}", error),
+        }
+    }
+
+    pub fn from_fen(fen: &str) -> Result<Game, String> {
+        fn epd_number(token: &str) -> Option<u32> {
+            token
+                .trim_matches(|c: char| c == ';' || c == '"')
+                .parse::<u32>()
+                .ok()
+        }
+
+        let mut parts = fen.split_whitespace();
 
         let net = get_network();
         let mut game = Game {
@@ -343,8 +357,19 @@ impl Game {
             update_nnue: true,
         };
 
+        let placement = parts
+            .next()
+            .ok_or("FEN parsing failure: missing piece placement")?;
+
         let mut y = 0u32;
-        for rank in parts.next().unwrap().split('/') {
+        for rank in placement.split('/') {
+            if y >= 8 {
+                return Err(format!(
+                    "FEN parsing failure: too many ranks in '{}'",
+                    placement
+                ));
+            }
+
             let mut x = 0u32;
 
             for char in rank.chars() {
@@ -352,6 +377,10 @@ impl Game {
                 if let Some(c) = char.to_digit(10) {
                     x += c;
                     continue;
+                }
+
+                if x >= 8 {
+                    return Err(format!("FEN parsing failure: rank '{}' is too long", rank));
                 }
 
                 let square = BoardSquare::from_position(x as u8, 8 - y as u8 - 1);
@@ -364,7 +393,9 @@ impl Game {
 
                 match Piece::from_char(char.to_ascii_lowercase()) {
                     Some(piece) => game.set_piece(square, (piece, color)),
-                    _ => {}
+                    None => {
+                        return Err(format!("FEN parsing failure: unknown piece '{}'", char));
+                    }
                 }
 
                 x += 1;
@@ -376,11 +407,17 @@ impl Game {
         match parts.next() {
             Some("b") => game.update_turn(0), // to flip turn
             Some("w") => {}
-            _ => panic!("Incorrect FEN format"),
+            Some(side) => {
+                return Err(format!(
+                    "FEN parsing failure: invalid side to move '{}'",
+                    side
+                ));
+            }
+            None => return Err("FEN parsing failure: missing side to move".to_string()),
         };
 
         let mut castling_flags = 0;
-        for c in parts.next().unwrap().chars() {
+        for c in parts.next().unwrap_or("-").chars() {
             match c {
                 'k' => castling_flags |= 0b00000001,
                 'q' => castling_flags |= 0b00000010,
@@ -392,24 +429,55 @@ impl Game {
         game.update_castling_flags(castling_flags);
 
         match parts.next() {
-            Some("-") => {}
+            None | Some("-") => {}
             Some(board_square_string) => match BoardSquare::parse(board_square_string) {
                 Some(square) => game.update_en_passant_bitmap(square.to_mask()),
-                _ => panic!("FEN parsing failure: incorrect En Passant target square"),
+                _ => {
+                    return Err(format!(
+                        "FEN parsing failure: incorrect En Passant target square '{}'",
+                        board_square_string
+                    ));
+                }
             },
-            _ => panic!("FEN parsing failure: incorrect En Passant target square"),
         }
 
-        game.halfmoves_since_capture = parts.next().unwrap_or("0").parse::<u8>().unwrap();
+        let mut halfmove_clock = 0;
+        let mut fullmoves = 1;
+
+        let rest = parts.collect::<Vec<_>>();
+        match rest.first() {
+            Some(first) if first.chars().all(|c| c.is_ascii_digit()) => {
+                halfmove_clock = first.parse::<u32>().unwrap_or(0);
+
+                if let Some(second) = rest.get(1) {
+                    if second.chars().all(|c| c.is_ascii_digit()) {
+                        fullmoves = second.parse::<usize>().unwrap_or(1).max(1);
+                    }
+                }
+            }
+            Some(_) => {
+                for (i, token) in rest.iter().enumerate() {
+                    let operand = rest.get(i + 1).and_then(|t| epd_number(t));
+
+                    match token.trim_end_matches(';') {
+                        "hmvc" => halfmove_clock = operand.unwrap_or(halfmove_clock),
+                        "fmvn" => fullmoves = operand.map_or(fullmoves, |v| (v as usize).max(1)),
+                        _ => {}
+                    }
+                }
+            }
+            None => {}
+        }
+
+        game.halfmoves_since_capture = halfmove_clock.min(u8::MAX as u32) as u8;
 
         // Fullmoves start at 1 and are incremented for white play
-        let fullmoves = parts.next().unwrap_or("1").parse::<usize>().unwrap();
         game.halfmoves = (fullmoves - 1) * 2 + 1;
         if game.side == Color::Black {
             game.halfmoves += 1;
         }
 
-        game
+        Ok(game)
     }
 
     #[allow(dead_code)]
