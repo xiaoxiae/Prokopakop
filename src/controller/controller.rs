@@ -372,7 +372,9 @@ impl GameController {
 
             // Output the best move in UCI format
             if uci_info {
-                if result.pv.len() >= 2 {
+                if result.best_move == BoardMove::empty() {
+                    println!("bestmove 0000");
+                } else if result.pv.len() >= 2 {
                     println!(
                         "bestmove {} ponder {}",
                         result.best_move.unparse(),

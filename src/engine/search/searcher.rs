@@ -66,6 +66,25 @@ impl<'a> Search<'a> {
 
         let (count, moves) = self.game.get_moves();
 
+        // No legal moves: the game is over
+        if count == 0 {
+            let evaluation = if self.game.is_king_in_check(self.game.side) {
+                -CHECKMATE_SCORE
+            } else {
+                0.0
+            };
+
+            if self.uci_info {
+                self.print_uci_info(0, evaluation, &[]);
+            }
+
+            return SearchResult {
+                best_move: BoardMove::empty(),
+                evaluation,
+                pv: Vec::new(),
+            };
+        }
+
         // If only one move is available, return it immediately (unless we are pondering)
         if count == 1 && !self.limits.exact && !self.stats.is_pondering() {
             let best_move = moves[0];
