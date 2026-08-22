@@ -11,7 +11,7 @@ fn main() {
 
     // Parse command line arguments
     let matches = Command::new("Prokopakop")
-        .version("1.0")
+        .version(env!("CARGO_PKG_VERSION"))
         .about("UCI Chess Engine, made to kop the Prokop")
         .arg(
             Arg::new("magic")
@@ -232,10 +232,14 @@ fn main() {
             GUICommand::UCI => {
                 let name = "Prokopakop";
                 let author = "Tomíno Komíno";
+                let version = env!("CARGO_PKG_VERSION");
                 let git_hash = env!("GIT_HASH");
                 let nnue_hash = &env!("NNUE_SHA256")[..8];
 
-                println!("id name {} (commit:{}, nnue:{})", name, git_hash, nnue_hash);
+                println!(
+                    "id name {} {} (commit:{}, nnue:{})",
+                    name, version, git_hash, nnue_hash
+                );
                 println!("id author {}", author);
 
                 controller.print_uci_options();
