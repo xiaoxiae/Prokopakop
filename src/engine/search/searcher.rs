@@ -872,11 +872,11 @@ impl<'a> Search<'a> {
     }
 
     /// Print UCI info string with search statistics
-    fn print_uci_info(&mut self, depth: usize, mut score: f32, pv: &[BoardMove]) {
+    fn print_uci_info(&mut self, depth: usize, score: f32, pv: &[BoardMove]) {
         let mut info = format!("info depth {}", depth);
 
-        // Convert score to white's perspective for UCI output
-        score = score * self.game.side;
+        // Scores stay relative to the side to move: the UCI spec requires
+        // `score cp`/`score mate` to be from the engine's point of view.
 
         // Check if this is a checkmate score
         if score.abs() > CHECKMATE_SCORE - 1000.0 {
